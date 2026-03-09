@@ -18,6 +18,7 @@ library(ggrepel)
 
 windowsFonts(Arial = windowsFont("Arial"))
 ```
+
 #Validate httk
 ##Load PFAS information
 ```{r}
@@ -55,25 +56,6 @@ get_caco2(
   chem.cas = "335-67-1",
   suppress.messages = FALSE
 )
-info_pfos_human <- subset(
-  pfas.clearance,
-  DTXSID == "DTXSID3031864" & Species == "Human"
-)
-info_pfos_human_avg <- info_pfos_human %>%
-  dplyr::summarise(
-    dplyr::across(where(is.numeric), ~ mean(.x, na.rm = TRUE))
-  )
-info_pfos_human_avg
-
-info_pfoa_human <- subset(
-  pfas.clearance,
-  DTXSID == "DTXSID8031865" & Species == "Human"
-)
-info_pfoa_human_avg <- info_pfoa_human %>%
-  dplyr::summarise(
-    dplyr::across(where(is.numeric), ~ mean(.x, na.rm = TRUE))
-  )
-info_pfoa_human_avg
 
 
 info_pfos_mouse <- subset(
@@ -94,7 +76,10 @@ pfoa_clearance_f <- 0.001851 *1.5 * 0.1805
 ```
 ##PFOS Plasma pfas1comp httk 2.7.2.
 ```{r}
-# ---- Setup ----
+mw_pfos <- 500.13  # g/mol for PFOS
+mw_pfoa <- 414.07  # g/mol for PFOA
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
+
 shape_map <- c(`Male` = 24, `Female` = 21)
 custom_colors_named <- c(
   "0"     = "#330597",
@@ -217,7 +202,7 @@ p <- ggplot() +
     values = c(shape_map, "PFAS-1comp Female" = 16, "PFAS-1comp Male" = 17)
   ) +
   theme_minimal() +
-  coord_cartesian(ylim = c(-10, 800)) +
+  coord_cartesian(ylim = c(-10, 1500)) +
   theme(
     text = element_text(family = "Arial", size = 12),
     axis.text.x = element_text(angle = 45, hjust = 1),
@@ -275,7 +260,7 @@ cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 
 ##PFOA Plasma pfas1comp httk 2.7.2.
 ```{r}
-
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
 available_rblood2plasma(
   chem.cas = "335-67-1",
     species = "Mouse",
@@ -395,7 +380,7 @@ p <- ggplot() +
     values = c(shape_map, "PFAS-1comp Female" = 16, "PFAS-1comp Male" = 17)
   ) +
   theme_minimal() +
-  coord_cartesian(ylim = c(-10, 800)) +
+  coord_cartesian(ylim = c(-10, 600)) +
   theme(
     text = element_text(family = "Arial", size = 12),
     axis.text.x = element_text(angle = 45, hjust = 1),
@@ -404,8 +389,7 @@ p <- ggplot() +
     panel.grid.minor = element_blank()
   )
 
-
-print(p)
+p
 ggsave(filename = "../plots/pfoa_1comp.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
 
 
@@ -452,42 +436,9 @@ max_n <- max(replicate_summary$n)
 cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
 
-# Calculate kliver2pu
-```{r}
-fu_values <- c(
-  PFOA = 0.0142,
-  PFOS = 0.00256
-)
-df_filtered <- pfas_obs_all %>%
-  filter(Tissue %in% c("Plasma", "Liver"))
-df_wide <- df_filtered %>%
-  select(Mouse.ID, Sex, PFAS_type, Dose, Time, Tissue, mg_L, mg_kg) %>%
-  filter(Dose != 0) %>%
-  pivot_wider(
-    names_from = Tissue,
-    values_from = c(mg_L, mg_kg)
-  )
-df_wide <- df_wide %>%
-  mutate(
-    fu_plasma = fu_values[PFAS_type],
-    Kliver2pu = mg_kg_Liver / (fu_plasma * mg_L_Plasma),
-    #Kkidney2pu = mg_kg_Kidney / (fu_plasma * mg_L_Plasma),
-    Liver_Plasma_Ratio = mg_kg_Liver / mg_L_Plasma,
-   # Kidney_Plasma_Ratio = mg_kg_Kidney / mg_L_Plasma
-  )
-K2pu <- df_wide %>%
-  group_by(PFAS_type, Sex) %>%
-  summarise(
-    mean_Kliver2pu = mean(Kliver2pu, na.rm = TRUE),
-    mean_Liver_Plasma_Ratio = mean(Liver_Plasma_Ratio, na.rm = TRUE),
-    n = n()
-  )
 
 
-
-```
-
-###PFOS Plasma PBTK solve_pbtk (class.exclude =F)
+###PFOS PBTK solve_pbtk (class.exclude =F)
 ```{r}
 shape_map <- c(`Male` = 24, `Female` = 21)
 pfos_obs <- pfas_obs_all %>%
@@ -530,9 +481,6 @@ pars_m$Funbound.plasma <- 0.00256
 pars_m$Rblood2plasma <- 0.588
 pars_m$Caco2.Pab <- 1.6
 pars_m$Clmetabolismc <- 0.0001917
-pars_m$Fabsgut <- 0.9798 #https://www.ncbi.nlm.nih.gov/books/NBK614278/
-pars_m$kgutabs <- 1.572
-pars_m$Kliver2pu <- 1344.4930 
 
 # ---- Female parameters ----
 pars_f <- pars_base
@@ -542,9 +490,6 @@ pars_f$Funbound.plasma <- 0.00256
 pars_f$Rblood2plasma <- 0.588
 pars_f$Caco2.Pab <- 1.6
 pars_f$Clmetabolismc <- 0.0002209
-pars_f$Fabsgut <- 0.9798 #https://www.ncbi.nlm.nih.gov/books/NBK614278/
-pars_f$kgutabs <- 1.572
-pars_f$Kliver2pu <- 846.4236
 
 pars_f_df <- data.frame(
   Parameter = names(pars_f),
@@ -600,7 +545,7 @@ predictions <- map_df(dose_vec, function(dose) {
     })
   })
 })
-solve_pbtk
+
 # Join model predictions with observed data 
 comparison <- pfos_obs %>%
   left_join(predictions, by = c("Dose", "Time", "Tissue"))
@@ -652,6 +597,7 @@ plot_pfos <- ggplot() +
     x = "Dose (mg/kg)",
     y = "PFOS Concentration (µM)"
   ) +
+  coord_cartesian(ylim = c(-10, 1600)) +
   theme_minimal() +
   theme(
     text = element_text(family = "Arial", size = 12),
@@ -660,12 +606,12 @@ plot_pfos <- ggplot() +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 
-print(plot_pfos)
+plot_pfos
 
 ggsave(filename = "../plots/pfos_pbtk.png", plot = plot_pfos, width = 12.5, height = 7.5, dpi = 300,bg = "white")
 
 
-predictions <- subset(predictions, Tissue %in% c("Plasma", "Liver")) #add kidney later
+predictions <- subset(predictions, Tissue %in% c("Plasma", "Liver", "Kidney")) 
 
 obs_vs_pred_table <- pfos_obs %>%
   inner_join(
@@ -711,7 +657,9 @@ max_n <- max(replicate_summary$n)
 cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
 
-###PFOA Plasma PBTK solve_pbtk (class.exclude =F)
+
+
+###PFOA  PBTK solve_pbtk (class.exclude =F)
 ```{r}
 shape_map <- c(`Male` = 24, `Female` = 21)
 pfoa_obs <- pfas_obs_all %>%
@@ -751,9 +699,6 @@ pars_m$Funbound.plasma <- 0.0142
 pars_m$Rblood2plasma <- 0.9047
 pars_m$Caco2.Pab <- 1.6
 pars_m$Clmetabolismc <- pfoa_clearance_m
-pars_m$Fabsgut <- 0.9798 #https://www.ncbi.nlm.nih.gov/books/NBK614278/
-pars_m$kgutabs <- 1.572
-pars_m$Kliver2pu <- 179.3938
   
 # ---- Female parameters ----
 pars_f <- pars_base
@@ -763,9 +708,6 @@ pars_f$Funbound.plasma <- 0.0142
 pars_f$Rblood2plasma <- 0.9047
 pars_f$Caco2.Pab <- 1.6
 pars_f$Clmetabolismc <- pfoa_clearance_f
-pars_f$Fabsgut <- 0.9798 #https://www.ncbi.nlm.nih.gov/books/NBK614278/
-pars_f$kgutabs <- 1.572
-pars_f$Kliver2pu <- 130.5985
 
 pars_f_df <- data.frame(
   Parameter = names(pars_f),
@@ -872,6 +814,7 @@ plot_pfoa <- ggplot() +
     x = "Dose (mg/kg)",
     y = "PFOA Concentration (µM)"
   ) +
+  coord_cartesian(ylim = c(-10, 600)) +
   theme_minimal() +
   theme(
     text = element_text(family = "Arial", size = 12),
@@ -880,9 +823,10 @@ plot_pfoa <- ggplot() +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 
-print(plot_pfoa)
 
+plot_pfoa
 ggsave(filename = "../plots/pfoa_pbtk.png", plot = plot_pfoa, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+predictions <- subset(predictions, Tissue %in% c("Plasma", "Liver", "Kidney")) 
 
 obs_vs_pred_table <- pfoa_obs %>%
   inner_join(
@@ -928,207 +872,9 @@ max_n <- max(replicate_summary$n)
 cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
 
-##PFOS Clearance 
-```{r}
-shape_map <- c(`Male` = 24, `Female` = 21)
-
-#convert to ml/day/kg
-clearance_pred_m <- 0.0002063 * 24* 1000
-clearance_pred_f <- 0.0002209 * 24* 1000
-
-clearance <- mean(c(clearance_pred_f, clearance_pred_m), na.rm = TRUE)
-
-  
-pfos_obs <- pfas_obs_all %>%
-  filter(PFAS_type == "PFOS")
-
-fecal_obs <- pfos_obs %>%
-  filter(Tissue == "Feces") %>% 
-   filter(Group != "Vehicle") %>%
-  select(Dose, Time, PFAS_conc, Mouse.ID, Sex) %>%
-  mutate(
-    # Convert ng/g → ng/kg feces
-    ng_kg_feces = PFAS_conc * 1000,
-
-    # Fecal excretion rate (kg feces / h / kg bw)
-    feces_rate_kg_h_kg = 0.08 / 24,
-
-    # Final excretion rate: ng / h / kg bw
-    ng_h_kg = ng_kg_feces * feces_rate_kg_h_kg
-  ) %>%
-  group_by(Dose, Time)
-
-plasma_obs <- pfos_obs %>%
-  filter(Tissue == "Plasma") %>%
-  select(Dose, Time, ng_L, Mouse.ID, Sex)
-
-clearance_fecal <- fecal_obs %>%
-  left_join(plasma_obs, by = c("Mouse.ID", "Dose", "Time", "Sex")) %>%
-  mutate(
-    CL_L_h_kg = ng_h_kg / ng_L)
-
-#Convert L/h/kg → mL/day/kg
-
-clearance_fecal <- clearance_fecal %>%
-  mutate(
-    CL_ml_day_kg = CL_L_h_kg * 24 * 1000)
-
-clearance_fecal$Dose_Time <- paste0(clearance_fecal$Dose, " (", clearance_fecal$Time, ")")
-
-
-p <- ggplot() +
-    geom_jitter(
-    data = clearance_fecal,
-    aes(x = factor(Dose_Time), y = CL_ml_day_kg, color = factor(Dose), fill = factor(Dose), shape = factor(Sex)),
-    size = 2, alpha = 0.5, width = 0.1, stroke = 1 
-    ) +
-  labs(
-    title = "PFOS —Clearance"
-  ) +
-    geom_hline(yintercept = clearance_pred_f, linetype = "dashed", color = "red", linewidth =0.8) +
-  geom_hline(yintercept = clearance_pred_m, linetype = "dashed", color = "blue", linewidth =0.8) +
-  scale_color_manual(
-  name = "Color",
-  values = c(custom_colors_named)
-  ) +
-  scale_fill_manual(
-  name = "Dose",
-  values = custom_colors_named
-  ) +
-  scale_shape_manual(
-  name = "Sex",
-  values = shape_map
-  ) +
-  theme_minimal() +
- coord_cartesian(ylim = c(0, 12.5)) + 
-  theme(
-      text = element_text(family = "Arial", size = 12),
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      legend.position = "b",
-      panel.grid.major = element_line(size = 0.5),
-      panel.grid.minor = element_blank())
-print(p)
-ggsave(filename = "../plots/pfos_clerance.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
-
-mean <- clearance_fecal %>%
-  ungroup() %>%
-  summarise(
-    n = n(),
-    mean_CL_ml_day_kg = mean(CL_ml_day_kg, na.rm = TRUE)
-  )
-FC <- clearance/mean$mean_CL_ml_day_kg
-
-replicate_summary <- clearance_fecal%>%
-  group_by(Dose, Time) %>%  
-  summarise(n = n(), .groups = "drop")
-min_n <- min(replicate_summary$n)
-max_n <- max(replicate_summary$n)
-cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
-```
-##PFOA Clearance
-```{r}
-#convert to ml/day/kg
-clearance_pred_m <- pfoa_clearance_m * 24* 1000
-clearance_pred_f <- pfoa_clearance_f * 24* 1000
-clearance <- mean(c(clearance_pred_f, clearance_pred_m), na.rm = TRUE)
-
-
-pfoa_obs <- pfas_obs_all %>%
-  filter(PFAS_type == "PFOA")
-
-fecal_obs <- pfoa_obs %>%
-  filter(Tissue == "Feces") %>% 
-  filter(Group != "Vehicle") %>% 
-  select(Dose, Time, PFAS_conc, Mouse.ID, Sex) %>%
-  mutate(
-    # Convert ng/g → ng/kg feces
-    ng_kg_feces = PFAS_conc * 1000,
-
-    # Fecal excretion rate (kg feces / h / kg bw)
-    feces_rate_kg_h_kg = 0.08 / 24,
-
-    # Final excretion rate: ng / h / kg bw
-    ng_h_kg = ng_kg_feces * feces_rate_kg_h_kg
-  ) %>%
-  group_by(Dose, Time)
-
-plasma_obs <- pfoa_obs %>%
-  filter(Tissue == "Plasma") %>%
-  select(Dose, Time, ng_L, Mouse.ID, Sex)
-
-clearance_fecal <- fecal_obs %>%
-  left_join(plasma_obs, by = c("Mouse.ID", "Dose", "Time", "Sex")) %>%
-  mutate(
-    CL_L_h_kg = ng_h_kg / ng_L)
-
-
-#Convert L/h/kg → mL/day/kg
-
-clearance_fecal <- clearance_fecal %>%
-  mutate(
-    CL_ml_day_kg = CL_L_h_kg * 24 * 1000)
-clearance_fecal$Dose_Time <- paste0(clearance_fecal$Dose, " (", clearance_fecal$Time, ")")
-
-p <- ggplot() +
-    geom_jitter(
-    data = clearance_fecal,
-    aes(x = factor(Dose_Time), y = CL_ml_day_kg, color = factor(Dose), fill = factor(Dose), shape = factor(Sex)),
-    size = 2, alpha = 0.5, width = 0.1, stroke = 1 
-    ) +
-    labs(
-    title = "PFOA —Clearance"
-  ) +
-  geom_hline(yintercept = clearance_pred_f, linetype = "dashed", color = "red", linewidth =0.8) +
-  geom_hline(yintercept = clearance_pred_m, linetype = "dashed", color = "blue", linewidth =0.8) +
-  scale_color_manual(
-  name = "Color",
-  values = c(custom_colors_named)
-  ) +
-  scale_fill_manual(
-  name = "Dose",
-  values = custom_colors_named
-  ) +
-  scale_shape_manual(
-  name = "Sex",
-  values = shape_map
-  ) +
-  theme_minimal() +
- coord_cartesian(ylim = c(0, 12.5)) +  
-  theme(
-      text = element_text(family = "Arial", size = 12),
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      legend.position = "b",
-      panel.grid.major = element_line(size = 0.5),
-      panel.grid.minor = element_blank())
-print(p)
-ggsave(filename = "../plots/pfoa_clerance.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
-
-
-
-mean <- clearance_fecal %>%
-  ungroup() %>%
-  summarise(
-    n = n(),
-    mean_CL_ml_day_kg = mean(CL_ml_day_kg, na.rm = TRUE)
-  )
-
-FC <- clearance/mean$mean_CL_ml_day_kg
-
-replicate_summary <- clearance_fecal%>%
-  group_by(Dose, Time) %>%  
-  summarise(n = n(), .groups = "drop")
-min_n <- min(replicate_summary$n)
-max_n <- max(replicate_summary$n)
-cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
-```
-
-
-
-
-
 
 #Human equvilant dose using httk 2.7.2
-#CHMS
+##CHMS/Olsen et al
 ```{r}
 #load in total data in ng/ml 2018-19, total, 3-79
 chms <- data.frame(
@@ -1142,47 +888,125 @@ chms <- chms %>%
   mutate(
     # ng/mL → mg/L
     C_plasma_mg_L = GeometricMean * 1e-3,
-
-    CL_L_kg_day = case_when(
-      #pfas.clearance httk function imported as L/H/KG times by 24 
-      Compound == "PFOS" ~ 4.7355e-06 *24	, 
-      Compound == "PFOA" ~ 5.5615e-06*24
-    ),
-
-    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
-
-    Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
-    Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
-  )
+    CI_Lower = CI_Lower * 1e-3,
+    CI_Upper= CI_Upper * 1e-3)
 
 #https://pmc.ncbi.nlm.nih.gov/articles/PMC1964923/
 #imported as ng/ml  arithmetric mean 
-firefighters <- data.frame(
+olsen <- data.frame(
   Compound = c("PFOS", "PFOA"),
   GeometricMean = c(799, 691),
   CI_Lower = c(145, 72),
   CI_Upper = c(3490, 5200)
 )
-firefighters <- firefighters %>%
+
+olsen <- olsen %>%
   mutate(
     # ng/mL → mg/L
     C_plasma_mg_L = GeometricMean * 1e-3,
-
-    CL_L_kg_day = case_when(
-        Compound == "PFOS" ~ 4.7355e-06 *24	, 
-      Compound == "PFOA" ~ 5.5615e-06*24
-    ),
-
-    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
-
-    Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
-    Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
-  )
-combined <- rbind(firefighters, chms)
+    CI_Lower = CI_Lower * 1e-3,
+    CI_Upper= CI_Upper * 1e-3)
 ```
 
 ##PFOS Oral equiv
 ```{r}
+#Calculate human mg/kg/day
+combined_pfos <- rbind(olsen, chms) %>%
+  filter(Compound == "PFOS")
+
+pars <- parameterize_sumclearancespfas(
+  chem.cas = "1763-23-1",
+  species = "Human",
+  dosingadj = "Oral",
+  default.to.human = TRUE
+)
+pars$Rblood2plasma <- 0.588
+oral_equiv_humans <- combined_pfos %>%
+  rowwise() %>%
+  mutate(
+    oral_equiv_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "1763-23-1",
+      conc = C_plasma_mg_L,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    ),
+    oral_equiv_lower_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "1763-23-1",
+      conc = CI_Lower,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    ),
+    oral_equiv_upper_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "1763-23-1",
+      conc = CI_Upper,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    )
+  ) %>%
+  ungroup()
+
+#calcualte mouse
+pfos_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOS") %>%
+    mutate(mg_L = as.numeric(trimws(mg_L)))
+
+plasma_obs_individual <- pfos_obs %>%
+  filter(Tissue == "Plasma") %>%
+  select(Mouse.ID, Dose, Time, mg_L, Sex)
+
+oral_equiv_individual <- plasma_obs_individual %>%
+  rowwise() %>%
+  mutate(
+    pars = list({
+      p <- parameterize_sumclearancespfas(
+        chem.cas = "1763-23-1",
+        species = "Human",
+        dosingadj = "Oral",
+        default.to.human = T
+      )
+      p$Rblood2plasma <- 0.588
+      p
+    }),
+    oral_equiv_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "1763-23-1",
+      conc = mg_L,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars,
+  
+    )
+  ) %>%
+  ungroup()
+
+oral_equiv_range <- oral_equiv_individual %>%
+  group_by(Dose, Time) %>%
+  summarise(
+    mean = mean(oral_equiv_mgkgd, na.rm = TRUE),
+    median = median(oral_equiv_mgkgd, na.rm = TRUE),
+    min = min(oral_equiv_mgkgd, na.rm = TRUE),
+    max = max(oral_equiv_mgkgd, na.rm = TRUE),
+    q25 = quantile(oral_equiv_mgkgd, 0.25, na.rm = TRUE),
+    q75 = quantile(oral_equiv_mgkgd, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+oral_equiv_individual$Dose_Time <- paste0(oral_equiv_individual$Dose, " (", oral_equiv_individual$Time, ")")
 
 shape_map <- c(`Male` = 24, `Female` = 21)
 custom_colors_named <- c(
@@ -1192,94 +1016,45 @@ custom_colors_named <- c(
   "1"       = "#f68f44",
   "1.5"     = "#fec029")
 
-
-pfos_obs <- pfas_obs_all %>%
-  filter(PFAS_type == "PFOS") %>%
-  mutate(uM = as.numeric(trimws(uM)))
-
-#I am using averaged PFAS conc in the plasma per dose and time group
-plasma_obs <- pfos_obs %>%
-  filter(Tissue == "Plasma") %>%
-  select(Dose, Time, uM)
-plasma_obs_avg_uM <- plasma_obs %>%
-  group_by(Dose, Time) %>%
-  summarise(avg_uM = mean(uM, na.rm = TRUE))
-
-dose_vec <- unique(plasma_obs_avg_uM$avg_uM)
-
-oral_equiv_results <- plasma_obs_avg_uM %>%
-  rowwise() %>%
-  mutate(
-    # Get human PFOS PK parameters (1-compartment PFAS model)
-    pars = list(parameterize_pfas1comp(
-      chem.cas = "1763-23-1",
-      species = "Human",
-      dosingadj = "Oral"
-    )),
-
-      pars = list({pars$Clint <- 0;   #https://pmc.ncbi.nlm.nih.gov/articles/PMC11435625/#sec3-toxics-12-00672
-      pars$Rblood2plasma <- 0.588; #httk 
-      pars$Vdist <- 0.23		#httk load pfas
-      pars$Funbound.plasma <-  0.000753; # file:///C:/Users/aloan/Downloads/toxics-12-00253.pdf
-      pars$Caco2.Pab <- 1.6; #httk default with function
-      pars$kelim <- 2.059e-05; pars}), # httk load pfas
-    view(pars),
-    write.csv(pars, "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/pars_pfos_hed.csv"),
-    oral_equiv_mgkgd = calc_mc_oral_equiv(
-      species = "Human",
-      chem.cas = "1763-23-1",
-      conc = avg_uM,
-      model = "pfas1compartment",
-      input.units = "uM",
-      output.units = "mgpkgpday",
-      samples = 2000,
-      parameters = pars
-    )
-  ) %>%
-  ungroup() %>%
-  select(Dose, Time, avg_uM, oral_equiv_mgkgd)
-
-
-
-pfos_biodata <- combined %>%
-  filter(Compound == "PFOS") 
-
-oral_equiv_results$Dose_Time <- paste0(oral_equiv_results$Dose, " (", oral_equiv_results$Time, ")")
-
 p <- ggplot() +
-  # Points: colored by Dose
-  geom_point(
-    data = oral_equiv_results, 
-    aes(
-      x = factor(Dose_Time),
-      y = oral_equiv_mgkgd,
-      color = factor(Dose),
-      fill  = factor(Dose),
-    ), alpha = 0.6, size = 3, stroke = 1
-  ) +
-geom_hline(
-  data = pfos_biodata,
-  aes(yintercept = Intake_mg_kg_day),
+  geom_hline(
+  data = oral_equiv_humans,
+  aes(yintercept = oral_equiv_mgkgd),
   color = c("red", "blue"),
   linetype = "dashed",
   linewidth = 0.8
 )+
   # Horizontal lines: colored by Source
 geom_rect(
-  data = pfos_biodata,
+  data = oral_equiv_humans,
   aes(
-    ymin = Intake_low,
-    ymax = Intake_high
+    ymin = oral_equiv_lower_mgkgd,
+    ymax = oral_equiv_upper_mgkgd
   ),
   xmin = -Inf,
   xmax = Inf,
   fill = c("red", "blue"),
   alpha = 0.4
 ) +
+  # Points: colored by Dose
+  geom_jitter(
+    data = oral_equiv_individual, 
+    aes(
+      x = factor(Dose_Time),
+      y = oral_equiv_mgkgd,
+      shape =Sex,
+      color = factor(Dose),
+      fill  = factor(Dose),
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+    scale_shape_manual(
+    name = "Sex",
+    values = shape_map
+  ) +
   # Log10 y-axis
- scale_y_log10(
-  limits = c(1e-7, 1e-1),
-  breaks = c(1e-6, 1e-5, 1e-4, 1e-3, 1e-2)
+scale_y_log10(
+  limits = c(1e-8, 1e0),
+  breaks = 10^seq(-8, 0, by = 2)
 ) +
   # Point colors for Dose
   scale_color_manual(
@@ -1305,106 +1080,146 @@ geom_rect(
     panel.grid.minor = element_blank()
   )
 
-print(p)
+p
 
-ggsave(filename = "../plots/pfos_hed.png", plot = p, width = 9, height = 3, dpi = 300,bg = "white")
+ggsave(filename = "../plots/pfos_hed_httk.png", plot = p, width = 10, height = 4, dpi = 300,bg = "white")
 ```
 
 
 ##PFOA Oral equiv
 ```{r}
+#Calculate human mg/kg/day
+combined_pfoa <- rbind(olsen, chms) %>%
+  filter(Compound == "PFOA")
 
-pfoa_obs <- pfas_obs_all %>%
-  filter(PFAS_type == "PFOA") %>%
-  mutate(uM = as.numeric(trimws(uM)))
+pars <- parameterize_sumclearancespfas(
+  chem.cas = "335-67-1",
+  species = "Human",
+  dosingadj = "Oral",
+  default.to.human = TRUE
+)
+pars$Rblood2plasma <- 0.9047
 
-#I am using averaged PFAS conc in the plasma per dose and time group
-plasma_obs <- pfoa_obs %>%
-  filter(Tissue == "Plasma") %>%
-  select(Dose, Time, uM)
-plasma_obs_avg_uM <- plasma_obs %>%
-  group_by(Dose, Time) %>%
-  summarise(avg_uM = mean(uM, na.rm = TRUE))
-
-dose_vec <- unique(plasma_obs_avg_uM$avg_uM)
-
-oral_equiv_results <- plasma_obs_avg_uM %>%
+oral_equiv_humans <- combined_pfoa %>%
   rowwise() %>%
   mutate(
-    # Get human PFOA PK parameters (1-compartment PFAS model)
-    pars = list(parameterize_pfas1comp(
-      chem.cas = "335-67-1",
-      species = "Human",
-      dosingadj = "Oral",
-      suppress.messages = TRUE
-    )),
-    view(pars),
-      pars = list({pars$Clint <- 0;   #https://pmc.ncbi.nlm.nih.gov/articles/PMC11435625/#sec3-toxics-12-00672
-      pars$Rblood2plasma <- 0.9047; #httk 
-      pars$Vdist <- 0.17	#httk load pfas
-      pars$Caco2.Pab <- 1.6; #httk default with function
-      pars$Funbound.plasma <- 0.00245;   # file:///C:/Users/aloan/Downloads/toxics-12-00253.pdf
-      pars$kelim <- 3.2715e-05 ; pars}), #httk load pfas
-    
-      view(pars),
-    write.csv(pars, "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/pars_pfoa_hed.csv"),
-    # Calculate human oral equivalent dose
     oral_equiv_mgkgd = calc_mc_oral_equiv(
       species = "Human",
-      chem.cas = "1763-23-1",
-      conc = avg_uM,
-      model = "pfas1compartment",
-      input.units = "uM",
+      chem.cas = "335-67-1",
+      conc = C_plasma_mg_L,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    ),
+    oral_equiv_lower_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "335-67-1",
+      conc = CI_Lower,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    ),
+    oral_equiv_upper_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "335-67-1",
+      conc = CI_Upper,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
       output.units = "mgpkgpday",
       samples = 2000,
       parameters = pars
     )
   ) %>%
-  ungroup() %>%
-  select(Dose, Time, avg_uM, oral_equiv_mgkgd)
+  ungroup()
 
+#calcualte mouse
+pfoa_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOA") %>%
+  mutate(mg_L = as.numeric(trimws(mg_L)))
 
-oral_equiv_results
+plasma_obs_individual <- pfoa_obs %>%
+  filter(Tissue == "Plasma") %>%
+  select(Mouse.ID, Dose, Time, mg_L, Sex)
+oral_equiv_individual <- plasma_obs_individual %>%
+  rowwise() %>%
+  mutate(
+    pars = list({
+      p <- parameterize_sumclearancespfas(
+        chem.cas = "335-67-1",
+        species = "Human",
+        dosingadj = "Oral",
+        default.to.human = T
+      )
+      p$Rblood2plasma <- 0.9047
+      p
+    }),
+    oral_equiv_mgkgd = calc_mc_oral_equiv(
+      species = "Human",
+      chem.cas = "335-67-1",
+      conc = mg_L,
+      model = "sumclearancespfas",
+      input.units = "mg/L",
+      output.units = "mgpkgpday",
+      samples = 2000,
+      parameters = pars
+    )
+  ) %>%
+  ungroup()
+oral_equiv_range <- oral_equiv_individual %>%
+  group_by(Dose, Time) %>%
+  summarise(
+    mean = mean(oral_equiv_mgkgd, na.rm = TRUE),
+    median = median(oral_equiv_mgkgd, na.rm = TRUE),
+    min = min(oral_equiv_mgkgd, na.rm = TRUE),
+    max = max(oral_equiv_mgkgd, na.rm = TRUE),
+    q25 = quantile(oral_equiv_mgkgd, 0.25, na.rm = TRUE),
+    q75 = quantile(oral_equiv_mgkgd, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
 
-pfoa_biodata <- combined %>%
-  filter(Compound == "PFOA" ) 
-
-oral_equiv_results$Dose_Time <- paste0(oral_equiv_results$Dose, " (", oral_equiv_results$Time, ")")
+oral_equiv_individual$Dose_Time <- paste0(oral_equiv_individual$Dose, " (", oral_equiv_individual$Time, ")")
 
 p <- ggplot() +
-  # Points: colored by Dose
-  geom_point(
-    data = oral_equiv_results, 
-    aes(
-      x = factor(Dose_Time),
-      y = oral_equiv_mgkgd,
-      color = factor(Dose),
-      fill  = factor(Dose),
-    ), alpha = 0.6, size = 3, stroke = 1
-  ) +
-geom_hline(
-  data = pfoa_biodata,
-  aes(yintercept = Intake_mg_kg_day),
+  geom_hline(
+  data = oral_equiv_humans,
+  aes(yintercept = oral_equiv_mgkgd),
   color = c("red", "blue"),
   linetype = "dashed",
   linewidth = 0.8
 )+
   # Horizontal lines: colored by Source
-geom_rect(
-  data = pfoa_biodata,
+ geom_rect(
+  data = oral_equiv_humans,
   aes(
-    ymin = Intake_low,
-    ymax = Intake_high
+    ymin = oral_equiv_lower_mgkgd,
+    ymax = oral_equiv_upper_mgkgd
   ),
   xmin = -Inf,
   xmax = Inf,
   fill = c("red", "blue"),
   alpha = 0.4
 ) +
+   geom_jitter( data = oral_equiv_individual, 
+    aes(
+      x = factor(Dose_Time),
+      y = oral_equiv_mgkgd,
+      color = factor(Dose),
+      fill  = factor(Dose),
+      shape =Sex,
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+    scale_shape_manual(
+    name = "Sex",
+    values = shape_map
+  ) +
   # Log10 y-axis
- scale_y_log10(
-  limits = c(1e-7, 1e-1),
-  breaks = c(1e-6, 1e-5, 1e-4, 1e-3, 1e-2)
+scale_y_log10(
+  limits = c(1e-8, 1e0),
+  breaks = 10^seq(-8, 0, by = 2)
 ) +
 
   # Point colors for Dose
@@ -1431,8 +1246,8 @@ geom_rect(
     panel.grid.minor = element_blank()
   )
 
-print(p)
-ggsave(filename = "../plots/pfoa_hed.png", plot = p, width = 9, height = 3, dpi = 300,bg = "white")
+p
+ggsave(filename = "../plots/pfoa_hed_httk.png", plot = p, width = 10, height = 4, dpi = 300,bg = "white")
 ```
 
 

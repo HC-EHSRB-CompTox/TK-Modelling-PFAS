@@ -8,114 +8,23 @@ library(dplyr)
 library(pracma)
 library(readxl)
 library(tidyr)
+library(stringr)
 ```
 
-#Load my data
+
+#PFOA Standard Model
 ```{r}
-mw_pfos <- 538.12  # g/mol for PFOS
+mw_pfos <- 500.13  # g/mol for PFOS
 mw_pfoa <- 414.07  # g/mol for PFOA
-
-#Imported in mg/L
-plasma_28 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/plasma_PFAS_values_fixed_28d.csv")
-plasma_56 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Plasma_PFAS_values_fixed_56d.csv")
-
-#Imported in mg/kg
-liver_28  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Liver_PFAS_values_fixed_28d.csv")
-liver_56  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Liver_PFAS_values_fixed_56d.csv")
-
-#Imported ng/g
-feces_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_56d.csv" )
-feces_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_28d.csv" )
-
-process_pfas_file <- function(df, tissue, timepoint) {
-  df <- df %>% filter(Group != "Naive")
-  df_vehicle <- df %>%
-    filter(Group == "Vehicle") %>%
-    mutate(
-      PFAS_type = "PFOA",
-      PFAS_conc = PFOA,
-      Tissue = tissue,
-      Time = timepoint
-    )
-  df_vehicle_dup <- df_vehicle %>%
-    mutate(
-      PFAS_type = "PFOS",
-      PFAS_conc = PFOS
-    )
-  df_vehicles_all <- bind_rows(df_vehicle, df_vehicle_dup)
-  df_exposed <- df %>%
-    filter(Group != "Vehicle") %>%
-    mutate(
-      PFAS_type = case_when(
-        str_starts(Group, "PFOS") ~ "PFOS",
-        str_starts(Group, "PFOA") ~ "PFOA",
-        TRUE ~ NA_character_
-      ),
-      PFAS_conc = case_when(
-        PFAS_type == "PFOS" ~ PFOS,
-        PFAS_type == "PFOA" ~ PFOA,
-        TRUE ~ NA_real_
-      ),
-      Tissue = tissue,
-      Time = timepoint
-    )
-  df_final <- bind_rows(df_vehicles_all, df_exposed) %>%
-    dplyr::select(Mouse.ID, Group, PFAS_type, PFAS_conc, Tissue, Time, Sex)
-  return(df_final)
-}
-
-plasma_28_clean <- process_pfas_file(plasma_28, tissue = "Plasma", timepoint = 28)
-plasma_56_clean <- process_pfas_file(plasma_56, tissue = "Plasma", timepoint = 56)
-liver_28_clean  <- process_pfas_file(liver_28,  tissue = "Liver",  timepoint = 28)
-liver_56_clean  <- process_pfas_file(liver_56,  tissue = "Liver",  timepoint = 56)
-feces_28_clean  <- process_pfas_file(feces_28,  tissue = "Feces",  timepoint = 28)
-feces_56_clean  <- process_pfas_file(feces_56,  tissue = "Feces",  timepoint = 56)
-
-
-pfas_obs_all <- bind_rows(plasma_28_clean, plasma_56_clean, liver_28_clean, liver_56_clean,feces_28_clean,feces_56_clean)
-
-
-pfas_obs_all <- pfas_obs_all %>%
-  mutate(
-    Dose = case_when(
-      Group == "Vehicle" ~ 0,
-      TRUE ~ as.numeric(str_extract(Group, "\\d+\\.?\\d*"))
-    ),
-    mw = case_when(
-      PFAS_type == "PFOA" ~ mw_pfoa,
-      PFAS_type == "PFOS" ~ mw_pfos,
-      TRUE ~ NA_real_
-    ),
-    PFAS_mg_L_eq = case_when(
-      Tissue == "Plasma" ~ PFAS_conc,                 # already mg/L
-      Tissue %in% c("Liver") ~ PFAS_conc,              # mg/kg ≈ mg/L
-      Tissue == "Feces" ~ PFAS_conc * 1e-6,            # ng/g → mg/kg and same # mg/kg ≈ mg/L
-      TRUE ~ NA_real_
-    ),
-
-    # ---- CONVERT TO µM ----
-    uM = PFAS_mg_L_eq / mw * 1000,
-
-    # Optional reporting columns
-    mg_L = ifelse(Tissue == "Plasma", PFAS_conc, NA_real_),
-    ng_L = ifelse(Tissue == "Plasma", PFAS_conc * 1e6, NA_real_),
-    mg_kg = ifelse(Tissue != "Plasma", PFAS_conc, NA_real_)
-  ) %>%
-  select(-mw)
-
-```
-
-#PFOA
-##PFOA Code
-```{r}
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
 # Duration of simulation
 days     = 56
 t_end    = days * 86400                       # duration of simulation in seconds
 
 #### Physiological & Chemical Parameters ####
 ## Body and blood parameters ##
-bw                 = 30                       # body weight (g)
-V_body             = 30                       # body volume (cm3)
+bw                 = 20                       # body weight (g)
+V_body             = 20                       # body volume (cm3)
 Q_blood_liver      = 0.021                    # Physiological blood flow rate perfusing the liver (cm3_blood/s)
 Q_blood_gut        = 0.025                    # Physiological blood flow rate perfusing the gut (cm3_blood/s)
 Q_blood_kidneys    = 0.0217                   # Physiological blood flow rate perfusing the liver (cm3_blood/s)
@@ -499,7 +408,7 @@ blood_concentration_plot <- ggplot(results.frame, aes(x=time/3600/24, y=Total_bl
   theme_minimal()
 
 # Show the blood concentration plot
-print(blood_concentration_plot)
+blood_concentration_plot
 
 # 2. Bar plot for total concentrations in tissues at the end of the simulation
 
@@ -574,6 +483,7 @@ results <- all_results %>%
   group_by(dose, day) %>%
   filter(time == max(time)) %>%
   ungroup()
+
 # Plotting of concentrations at the end of the simulation
 results$C_total_blood <- 
   (results$C_free_blood * V_water_blood + 
@@ -627,8 +537,19 @@ tissue_long$Concentration_uM <-
 ```
 
 
-## Plot and intergrate 
+
+## Plot PBTK
 ```{r}
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"     = "#330597",
+  "0.166" = "#b12a90",
+  "0.5"   = "#d35171",
+  "1"     = "#f68f44",
+  "1.5"   = "#fec029"
+)
+
 pfoa_obs <- pfas_obs_all %>%
   filter(PFAS_type == "PFOA",
     Tissue != "Feces")
@@ -640,13 +561,14 @@ pfoa_obs <- pfoa_obs %>%
     mutate(uM = as.numeric(trimws(uM)),
     Tissue = factor(Tissue, levels = tissues_all)) 
 
-tissues_all <- c("C_total_blood", "C_total_plasma", "C_total_liver", "C_total_kidneys",  "C_total_gut", "C_total_rest")
-tissue_long <- tissue_long %>%
+tissues_all <- c( "C_total_plasma", "C_total_liver", "C_total_kidneys",  "C_total_gut", "C_total_rest")
+pbtk <- tissue_long %>%
+   filter(Compartment != "C_total_blood")  %>%
   mutate(
     Tissue = factor(
       Compartment,
       levels = tissues_all,
-      labels = c("Blood",
+      labels = c(
                  "Plasma", 
                  "Liver", 
                  "Kidney", 
@@ -657,8 +579,8 @@ tissue_long <- tissue_long %>%
 
 
 pfoa_obs$Dose_Time <- paste0(pfoa_obs$Dose, " (", pfoa_obs$Time, ")")
-tissue_long$Dose_Time <- paste0(tissue_long$dose, " (", tissue_long$day, ")")
-tissue_long <- subset(tissue_long, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
+pbtk$Dose_Time <- paste0(pbtk$dose, " (", pbtk$day, ")")
+pbtk <- subset(pbtk, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
 plot_pfoa <- ggplot() +
     # ---- Observed (dose-colored) ----
@@ -668,7 +590,7 @@ plot_pfoa <- ggplot() +
     size = 2, alpha = 0.5, width = 0.1, stroke = 1, 
   ) +
   geom_point(
-    data = tissue_long %>% filter(days %in% c(28, 56)),
+    data = pbtk %>% filter(days %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = Concentration_uM),
     fill = "red",color = "red", size = 2, 
   ) +
@@ -690,6 +612,7 @@ plot_pfoa <- ggplot() +
     x = "Dose (mg/kg)",
     y = "PFOA Concentration (µM)"
   ) +
+  coord_cartesian(ylim = c(-10, 600)) +
   theme_minimal() +
   theme(
     text = element_text(family = "Arial", size = 12),
@@ -698,11 +621,54 @@ plot_pfoa <- ggplot() +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 
-print(plot_pfoa)
+plot_pfoa
+ggsave(filename = "../plots/pfoa_fischer.png", plot = plot_pfoa, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+obs_vs_pred_table <- pfoa_obs %>%
+  inner_join(
+    pbtk,
+    by = c("Dose_Time", "Tissue")
+  ) %>%
+  mutate(
+    diff_uM      = Concentration_uM - uM,
+    fold_diff    = Concentration_uM / uM,
+    percent_diff = 100 * diff_uM / uM
+  ) %>%
+  select(
+    Dose_Time,
+    Tissue,
+    Observed_uM  = uM,
+    Predicted_uM = Concentration_uM,
+    diff_uM,
+    fold_diff,
+    percent_diff
+  ) %>%
+  arrange(Tissue, desc(fold_diff))
+
+
+tissue_summary <- obs_vs_pred_table %>%
+  group_by(Tissue) %>%
+  summarise(
+    n = n(),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_fold  = mean(fold_diff, na.rm = TRUE),
+    times_lower = ifelse(mean_fold < 1, 1 / mean_fold, NA_real_),
+    times_higher = ifelse(mean_fold > 1, mean_fold, NA_real_),
+    .groups = "drop"
+  )
+tissue_summary
+
+replicate_summary <- pfoa_obs%>%
+  group_by(Dose, Time, Tissue) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
 
-#PFOS
-##PFOS Code
+
+####################################### clear between 
+#PFOS Standard model
 ```{r}
 # Duration of simulation
 days     = 56
@@ -710,8 +676,8 @@ t_end    = days * 86400                       # duration of simulation in second
 
 #### Physiological & Chemical Parameters ####
 ## Body and blood parameters ##
-bw                 = 30                       # body weight (g)
-V_body             = 30                       # body volume (cm3)
+bw                 = 20                       # body weight (g)
+V_body             = 20                       # body volume (cm3)
 Q_blood_liver      = 0.021                    # Physiological blood flow rate perfusing the liver (cm3_blood/s)
 Q_blood_gut        = 0.025                    # Physiological blood flow rate perfusing the gut (cm3_blood/s)
 Q_blood_kidneys    = 0.0217                   # Physiological blood flow rate perfusing the liver (cm3_blood/s)
@@ -910,7 +876,7 @@ total_dose         = total_IV_dose + total_oral_dose
 # Constant intake (for diffusive uptake, set to "0" if not applicable)
 daily_IV_dose          = 0 * bw/1000/84600         # mg per kg body weight per second
 amount_in_blood        = daily_IV_dose             # intake of PFAS in blood (mg/s) 
-daily_oral_dose        = 1.5 * bw/1000/84600         # mg per kg body weight per second
+daily_oral_dose        = 1.5* bw/1000/84600         # mg per kg body weight per second
 amount_in_gut          = daily_oral_dose           # daily oral doses (mg) 
 
 #### SIMULATION #####
@@ -1205,7 +1171,7 @@ tissue_long <- results %>%
   )
 
 #convert to uM
-mw_pfos <- 538.12  # g/mol for PFOS
+mw_pfos <- 500.13  # g/mol for PFOS
 Rblood2plasma <- 0.588
 
 plasma_rows <- tissue_long %>%
@@ -1223,8 +1189,18 @@ tissue_long$Concentration_uM <-
 ```
 
 
-## Plot and intergrate 
+## Plot PBTK
 ```{r}
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"     = "#330597",
+  "0.166" = "#b12a90",
+  "0.5"   = "#d35171",
+  "1"     = "#f68f44",
+  "1.5"   = "#fec029"
+)
+
 pfos_obs <- pfas_obs_all %>%
   filter(PFAS_type == "PFOS",
     Tissue != "Feces")
@@ -1236,13 +1212,14 @@ pfos_obs <- pfos_obs %>%
     mutate(uM = as.numeric(trimws(uM)),
     Tissue = factor(Tissue, levels = tissues_all)) 
 
-tissues_all <- c("C_total_blood", "C_total_plasma", "C_total_liver", "C_total_kidneys",  "C_total_gut", "C_total_rest")
-tissue_long <- tissue_long %>%
+tissues_all <- c("C_total_plasma", "C_total_liver", "C_total_kidneys",  "C_total_gut", "C_total_rest")
+pbtk <- tissue_long %>%
+   filter(Compartment != "C_total_blood")  %>%
   mutate(
     Tissue = factor(
       Compartment,
       levels = tissues_all,
-      labels = c("Blood",
+      labels = c(
                  "Plasma", 
                  "Liver", 
                  "Kidney", 
@@ -1253,8 +1230,8 @@ tissue_long <- tissue_long %>%
 
 
 pfos_obs$Dose_Time <- paste0(pfos_obs$Dose, " (", pfos_obs$Time, ")")
-tissue_long$Dose_Time <- paste0(tissue_long$dose, " (", tissue_long$day, ")")
-tissue_long <- subset(tissue_long, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
+pbtk$Dose_Time <- paste0(pbtk$dose, " (", pbtk$day, ")")
+pbtk <- subset(pbtk, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
 plot_pfos <- ggplot() +
     # ---- Observed (dose-colored) ----
@@ -1264,7 +1241,7 @@ plot_pfos <- ggplot() +
     size = 2, alpha = 0.5, width = 0.1, stroke = 1, 
   ) +
   geom_point(
-    data = tissue_long %>% filter(days %in% c(28, 56)),
+    data = pbtk %>% filter(days %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = Concentration_uM),
     fill = "red",color = "red", size = 2, 
   ) +
@@ -1286,6 +1263,7 @@ plot_pfos <- ggplot() +
     x = "Dose (mg/kg)",
     y = "PFOS Concentration (µM)"
   ) +
+  coord_cartesian(ylim = c(-10, 1600)) +
   theme_minimal() +
   theme(
     text = element_text(family = "Arial", size = 12),
@@ -1294,5 +1272,52 @@ plot_pfos <- ggplot() +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 
-print(plot_pfos)
+plot_pfos
+ggsave(filename = "../plots/pfos_fischer.png", plot = plot_pfos, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+
+obs_vs_pred_table <- pfos_obs %>%
+  inner_join(
+    pbtk,
+    by = c("Dose_Time", "Tissue")
+  ) %>%
+  mutate(
+    diff_uM      = Concentration_uM - uM,
+    fold_diff    = Concentration_uM / uM,
+    percent_diff = 100 * diff_uM / uM
+  ) %>%
+  select(
+    Dose_Time,
+    Tissue,
+    Observed_uM  = uM,
+    Predicted_uM = Concentration_uM,
+    diff_uM,
+    fold_diff,
+    percent_diff
+  ) %>%
+  arrange(Tissue, desc(fold_diff))
+
+
+tissue_summary <- obs_vs_pred_table %>%
+  group_by(Tissue) %>%
+  summarise(
+    n = n(),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_fold  = mean(fold_diff, na.rm = TRUE),
+    times_lower = ifelse(mean_fold < 1, 1 / mean_fold, NA_real_),
+    times_higher = ifelse(mean_fold > 1, mean_fold, NA_real_),
+    .groups = "drop"
+  )
+tissue_summary
+
+replicate_summary <- pfos_obs%>%
+  group_by(Dose, Time, Tissue) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
+
+
+
+

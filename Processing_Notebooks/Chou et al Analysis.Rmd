@@ -1,0 +1,930 @@
+#Load libraries
+```{r}
+library(mrgsolve)   
+library(magrittr)   
+library(dplyr)       
+library(ggplot2)    
+library(FME)         
+library(minpack.lm)  
+library(reshape)     
+library(truncnorm)   
+library(EnvStats)    
+library(invgamma)   
+library(foreach)     
+library(doParallel)  
+library(bayesplot)  
+library(FME) 
+library(tidyr)
+library(stringr)
+```
+
+#Just a test with 1.5mg/kg/day at 56 days 
+```{r}
+## Build mrgsolve-based PBPK Model
+library(mrgsolve) 
+  micePBPK.code <- readRDS (file = "../PFOS/Additional files/Results/Workplace/micePBPK.RDS")
+mod <- mcode ("micepbpk", micePBPK.code)
+
+
+
+################################################################################################## 
+# Mouse datasets for model calibration                                                           #
+# Measured Plasma, kidney, liver, urine and feces as matrix (Chang et al., 2012)                 #
+# A1: CD1 mice oral single dose of 1 mg/kg; Matrix: plasma                                       #
+# A2: CD1 mice oral single dose of 1 mg/kg; Matrix: liver                                        #
+# A3: CD1 mice oral single dose of 1 mg/kg; Matrix: kidney                                       #
+# A4: CD1 mice oral single dose of 1 mg/kg; Matrix: urine                                        #
+##################################################################################################
+
+## The observed data adopoted from Chang et al., 2012; single oral dose of 1 mg/kg; 
+## input data set
+
+Obs.A1 <- read.csv(file ="../PFOS/Additional files/Datasets/Mouse/A1.csv")   ## A1 dataset: oral single dose of 1 mg/kg; Matrix: plasma (Unit: ug/ml)
+names(Obs.A1)=c("Time", "CA")
+
+Obs.A2 <-read.csv(file  ="../PFOS/Additional files/Datasets/Mouse/A2.csv")   ## A2 dataset: oral single dose of 1 mg/kg; Liver (Unit: ug/g)
+names(Obs.A2)=c("Time", "CL")
+
+Obs.A3 <- read.csv(file ="../PFOS/Additional files/Datasets/Mouse/A3.csv")   ## A3 dataset: oral single dose of 1 mg/kg; Kidney (Unit: ug/g)
+names(Obs.A3)=c("Time", "CK")
+
+Obs.A4 <-read.csv(file  ="../PFOS/Additional files/Datasets/Mouse/A4.csv")   ## A4 dataset: oral single dose of 1 mg/kg; Urine (Unit: % dose)
+names(Obs.A4)=c("Time", "Curine")
+
+
+## Define the prediction function (for model fitting using levenberg-marquart algorithm)
+pred.mouse <- function(pars) {
+  
+  ## Get out of log domain
+  pars %<>% lapply(exp)
+
+  ## Define the exposure scenario for oral exposue to 1 mg/kg-day
+  
+  BW           = 0.025                             ## kg, Mice body weight
+  tinterval    = 24                                ## hr, Time interval
+  TDoses       = 56                                 ## Dose times
+  PDOSEoral    = 1.5                              ## mg/kg-day, Single oral dose
+  DOSEoral     = PDOSEoral*BW                      ## mg, amount of oral dose
+  ex.oral<- ev(ID=1, amt= DOSEoral,                ## Set up the exposure regimes
+            ii=tinterval, addl=TDoses-1, cmt="AST", replicate = FALSE)
+
+  ## Set up the exposure time
+  tsamp=tgrid(0,tinterval*(TDoses-1)+24*56,1)    
+  
+  ## Get a prediction
+  ## Out: oral exposure to 1 mg/kg-d, matrix: Plasma, Liver, Kidney, urine and feces
+  out.A <- 
+    mod %>% 
+    param(pars) %>%
+    Req(Plasma, Liver, Kidney, Aurine, Afeces)%>%
+    update(atol = 1E-2,maxsteps = 50000) %>%
+    mrgsim_d(data = ex.oral, tgrid=tsamp)
+    out.A<-cbind.data.frame(Time=out.A$time/24, 
+                            CA=out.A$Plasma, 
+                            CL=out.A$Liver, 
+                            CK= out.A$Kidney, 
+                            Curine=(out.A$Aurine/DOSEoral)*100,
+                            Cfeces=(out.A$Afeces/DOSEoral)*100) 
+  return(out.A)
+}
+
+
+
+## Local sensitivity analysis
+## Choose the senstiive parameters in the model
+## initial parmaeters
+theta.int <- log(c(
+  Vmax_baso_invitro     = 393.45,                      ## Vmax of basolateral transpoters
+  Km_baso               = 27.2,                        ## Km of basolateral transpoters
+  Vmax_apical_invitro   = 9300,                        ## Vmax of apical transpoters
+  Km_apical             = 52.3,                        ## Km of apical transpoters
+  RAFapi                = 4.07,                        ## Relative acitivty factor of apical transpoter
+  RAFbaso               = 3.99,                        ## Relative activity factor of basolateral transpoter
+  KeffluxC              = 2.49,                        ## Rate of clearance of PFOS from proximal tubule cells into bloods
+  KbileC                = 0.004,                       ## Biliary elimiatnion rate
+  KurineC               = 1.6,                         ## Urinary elimination rate
+  Free                  = 0.09,                        ## Free fraction in plasma
+  PL                    = 3.72,                        ## Liver/plasma partition coefficient (PC)
+  PK                    = 0.8,                         ## Kidney/plasma PC
+  PRest                 = 0.2,                         ## Restofbody/plasma PC
+  K0C                   = 1,                           ## Rate of absorption of PFOS in the stomach
+  Kabsc                 = 2.12,                        ## Rate of absorption of PFOS in the small intestines
+  Kdif                  = 0.001,                       ## Diffusion rate from proximal tubule cells;
+  KunabsC               = 7.05e-5                      ## Rate of unabobded dose to appear in feces
+))
+
+## Senstivity function (FME)
+## Check the senstive parameters in the model
+SnsPlasma <- sensFun(func = pred.mouse, parms = theta.int,varscale = 1)
+Sen=summary(SnsPlasma)
+
+plot(summary(SnsPlasma))
+
+
+## Cost function (FME)
+## Estimate the model residual by modCost function
+MCcost<-function (pars){
+  out<- pred.mouse(pars)
+  cost<- modCost(model=out,obs=Obs.A1,weight='std',x="Time")
+  cost<- modCost(model=out,obs=Obs.A2,weight='std',x="Time",cost=cost)
+  cost<- modCost(model=out,obs=Obs.A3,weight='std',x="Time",cost=cost)
+  cost<- modCost(model=out,obs=Obs.A4,weight='std',x="Time",cost=cost)
+  return(cost)
+}
+
+
+## set up senstivie or necessary parametesr as model input
+## Fitting parmaers
+
+theta <- log(c(
+  #Vmax_baso_invitro     = 393.45,                      ## Vmax of basolateral transpoters
+  #Km_baso               = 27.2,                        ## Km of basolateral transpoters
+  Vmax_apical_invitro    = 9300,                        ## Vmax of apical transpoters
+  #Km_apical             = 52.3,                        ## Km of apical transpoters
+  RAFapi                 = 4.07,                        ## Relative acitivty factor of apical transpoter
+  #RAFbaso               = 3.99,                        ## Relative activity factor of basolateral transpoter
+  KeffluxC               = 2.49,                        ## Rate of clearance of PFOS from proximal tubule cells into bloods
+  KbileC                 = 0.004,                       ## Biliary elimiatnion rate
+  #KurineC               = 1.6,                         ## Urinary elimination rate
+  Free                   = 0.09,                        ## Free fraction in plasma
+  #PL                    = 3.72,                        ## Liver/plasma partition coefficient (PC)
+  #PK                    = 0.8,                         ## Kidney/plasma PC
+  #PRest                 = 0.2,                         ## Restofbody/plasma PC
+  #K0C                   = 1,                           ## Rate of absorption of PFOS in the stomach
+  Kabsc                  = 2.12,                        ## Rate of absorption of PFOS in the small intestines
+  Kdif                   = 0.001                        ## Diffusion rate from proximal tubule cells;
+  #KunabsC               = 7.05e-5                      ## Rate of unabobded dose to appear in feces
+))
+
+## PBPK model fitting 
+## least squres fit using levenberg-marquart (method "Marq") or Nelder-Mead algorithm
+
+Fit<- modFit(f=MCcost, p=theta, method ="Marq",
+             control = nls.lm.control(nprint=1))
+
+summary(Fit)                           ## Summary of fit
+exp(Fit$par)                           ## Get the arithmetic value out of the log domain
+
+res=MCcost(Fit$par)$residuals$res      ## Check the residual for each time points
+sum(res^2)                             ## Total residuals 
+
+
+## Plot using calibarated parameters
+
+Sim.fit.A = pred.mouse (par=Fit$par)
+df.sim.A  = cbind.data.frame (Time=Sim.fit.A$Time, 
+                              CA=Sim.fit.A$CA, ## ug/ml,PFOS levels in plasma  
+                              CL=Sim.fit.A$CL,## ug/g,PFOS levels in plasma  
+                              CK=Sim.fit.A$CK,## ug/g,PFOS levels in plasma  
+                              Curine=Sim.fit.A$Curine)
+
+
+plot.A1=
+  ggplot() +
+  geom_line(data  = df.sim.A,aes(Time,CA), col="firebrick", lwd=2)+
+  geom_point(data = Obs.A1 ,aes(Time, CA),size=2.5) + ylab("Concentration") +
+  labs(
+    title = "Plasma")  
+
+
+plot.A2=
+  ggplot() +
+  geom_line(data  = df.sim.A,aes(Time,CL), col="firebrick", lwd=2)+
+  geom_point(data = Obs.A2 ,aes(Time, CL),size=2.5) + ylab("Concentration")  +
+  labs(
+    title = "CLiver")
+
+
+plot.A3=
+  ggplot() +
+  geom_line(data  = df.sim.A,aes(Time,CK), col="firebrick", lwd=2)+
+  geom_point(data = Obs.A3 ,aes(Time, CK),size=2.5) + ylab("Concentration")  +
+  labs(
+    title = "CKidneys")
+
+
+plot.A4=
+  ggplot() +
+  geom_line(data  = df.sim.A,aes(Time,Curine), col="firebrick", lwd=2)+
+  geom_point(data = Obs.A4 ,aes(Time, Curine),size=2.5) + ylab("Concentration") +
+  labs(
+    title = "Curine")
+
+
+plot.A1
+ggsave(filename = "../plots/plasma.png", plot = plot.A1, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+plot.A2
+ggsave(filename = "../plots/CLiver.png", plot = plot.A2, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+plot.A3
+ggsave(filename = "../plots/CKidneys.png", plot = plot.A3, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+plot.A4
+ggsave(filename = "../plots/Curine.png", plot = plot.A4, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+
+
+```
+##Wrap for multiple days and doses
+```{r}
+## Code from Chou et al modified to for loop
+
+pred.mouse <- function(pars) {
+
+  pars %<>% lapply(exp)
+
+  BW <- 0.02 
+  tinterval <- 24 
+  day_vec   <- c(28, 56)
+  dose_vec  <- c(0.166, 0.5, 1, 1.5)
+
+  results_list <- list()
+  counter <- 1
+  
+  for (TDoses in day_vec) {
+    for (PDOSEoral in dose_vec) {
+      
+      DOSEoral <- PDOSEoral * BW 
+      
+      ex.oral <- ev(
+        ID = 1,
+        amt = DOSEoral,
+        ii = tinterval,
+        addl = TDoses - 1,
+        cmt = "AST",
+        replicate = FALSE
+      )
+      
+  
+      tsamp <- tgrid(0, tinterval * TDoses, 1)
+       
+      out <- mod %>% 
+        param(pars) %>%
+        Req(Plasma, Liver, Kidney, Aurine, Afeces) %>%
+        update(atol = 1E-8, rtol = 1E-8, maxsteps = 5000) %>%
+        mrgsim_d(data = ex.oral, tgrid = tsamp)
+      
+      out_df <- data.frame(
+        Time   = out$time / 24,
+        CA     = out$Plasma,
+        CL     = out$Liver,
+        CK     = out$Kidney,
+        Curine = (out$Aurine / DOSEoral) * 100,
+        Cfeces = (out$Afeces / DOSEoral) * 100,
+        Days   = TDoses,
+        Dose   = PDOSEoral
+      )
+      
+      results_list[[counter]] <- out_df
+      counter <- counter + 1
+    }
+  }
+  
+  final_out <- do.call(rbind, results_list)
+  return(final_out)
+}
+
+
+theta.int <- log(c(
+  Vmax_baso_invitro     = 393.45,                      ## Vmax of basolateral transpoters
+  Km_baso               = 27.2,                        ## Km of basolateral transpoters
+  Vmax_apical_invitro   = 9300,                        ## Vmax of apical transpoters
+  Km_apical             = 52.3,                        ## Km of apical transpoters
+  RAFapi                = 4.07,                        ## Relative acitivty factor of apical transpoter
+  RAFbaso               = 3.99,                        ## Relative activity factor of basolateral transpoter
+  KeffluxC              = 2.49,                        ## Rate of clearance of PFOS from proximal tubule cells into bloods
+  KbileC                = 0.004,                       ## Biliary elimiatnion rate
+  KurineC               = 1.6,                         ## Urinary elimination rate
+  Free                  = 0.09,                        ## Free fraction in plasma
+  PL                    = 3.72,                        ## Liver/plasma partition coefficient (PC)
+  PK                    = 0.8,                         ## Kidney/plasma PC
+  PRest                 = 0.2,                         ## Restofbody/plasma PC
+  K0C                   = 1,                           ## Rate of absorption of PFOS in the stomach
+  Kabsc                 = 2.12,                        ## Rate of absorption of PFOS in the small intestines
+  Kdif                  = 0.001,                       ## Diffusion rate from proximal tubule cells;
+  KunabsC               = 7.05e-5                      ## Rate of unabobded dose to appear in feces
+))
+
+## Senstivity function (FME)
+library(magrittr) 
+SnsPlasma <- sensFun(func = pred.mouse, parms = theta.int,varscale = 1)
+Sen=summary(SnsPlasma)
+
+plot(summary(SnsPlasma))
+
+
+## Cost function (FME)
+MCcost<-function (pars){
+  out<- pred.mouse(pars)
+  cost<- modCost(model=out,obs=Obs.A1,weight='std',x="Time")
+  cost<- modCost(model=out,obs=Obs.A2,weight='std',x="Time",cost=cost)
+  cost<- modCost(model=out,obs=Obs.A3,weight='std',x="Time",cost=cost)
+  cost<- modCost(model=out,obs=Obs.A4,weight='std',x="Time",cost=cost)
+  return(cost)
+}
+
+
+theta <- log(c(
+  #Vmax_baso_invitro     = 393.45,                      ## Vmax of basolateral transpoters
+  #Km_baso               = 27.2,                        ## Km of basolateral transpoters
+  Vmax_apical_invitro    = 9300,                        ## Vmax of apical transpoters
+  #Km_apical             = 52.3,                        ## Km of apical transpoters
+  RAFapi                 = 4.07,                        ## Relative acitivty factor of apical transpoter
+  #RAFbaso               = 3.99,                        ## Relative activity factor of basolateral transpoter
+  KeffluxC               = 2.49,                        ## Rate of clearance of PFOS from proximal tubule cells into bloods
+  KbileC                 = 0.004,                       ## Biliary elimiatnion rate
+  #KurineC               = 1.6,                         ## Urinary elimination rate
+  Free                   = 0.09,                        ## Free fraction in plasma
+  #PL                    = 3.72,                        ## Liver/plasma partition coefficient (PC)
+  #PK                    = 0.8,                         ## Kidney/plasma PC
+  #PRest                 = 0.2,                         ## Restofbody/plasma PC
+  #K0C                   = 1,                           ## Rate of absorption of PFOS in the stomach
+  Kabsc                  = 2.12,                        ## Rate of absorption of PFOS in the small intestines
+  Kdif                   = 0.001                        ## Diffusion rate from proximal tubule cells;
+  #KunabsC               = 7.05e-5                      ## Rate of unabobded dose to appear in feces
+))
+
+## PBPK model fitting 
+library(minpack.lm)
+Fit<- modFit(f=MCcost, p=theta, method ="Marq",
+             control = nls.lm.control(nprint=1))
+
+summary(Fit)                           ## Summary of fit
+exp(Fit$par)                           ## Get the arithmetic value out of the log domain
+
+res=MCcost(Fit$par)$residuals$res      ## Check the residual for each time points
+sum(res^2)                             ## Total residuals 
+
+
+
+Sim.fit.A = pred.mouse (par=Fit$par)
+df.sim.A  = cbind.data.frame (Time=Sim.fit.A$Time, 
+                              CA=Sim.fit.A$CA, 
+                              CL=Sim.fit.A$CL,
+                              CK=Sim.fit.A$CK,
+                              Curine=Sim.fit.A$Curine,
+                              Cfeces=Sim.fit.A$Cfeces,
+                              Days = Sim.fit.A$Days,
+                              Dose = Sim.fit.A$Dose
+                        )
+
+#Extract max CA concentration on day 56
+df.final_56 <- df.sim.A %>%
+  filter(Days == 56,
+         Time >= 55,
+         Time <= 56) %>%
+  group_by(Dose) %>%
+  slice_max(CA, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+#Extract max CA concentration on day 28 
+df.final_28 <- df.sim.A %>%
+  filter(Days == 28,
+         between(Time, 27, 28)) %>%
+  group_by(Dose) %>%
+  slice_max(CA, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+df.final <- rbind(df.final_28, df.final_56)
+
+#making a control row 
+zero_rows <- data.frame(
+  Time   = c(56, 28),
+  CA     = 0,
+  CL     = 0,
+  CK     = 0,
+  Curine = 0,
+  Cfeces = 0, 
+  Days   = c(56, 28),
+  Dose   = 0
+)
+
+df.final <- bind_rows(df.final, zero_rows)
+
+mw_pfos <- 500.13  # g/mol for PFOS
+
+#converting ug/g or ug/ml to uM assume 1g= 1mL
+tissue_long <- df.final %>%
+  select(Time, Dose, Days,
+         CA, CL, CK,
+         Curine, Cfeces) %>%
+  pivot_longer(
+    cols = CA:Cfeces,
+    names_to = "Compartment",
+    values_to = "Concentration"
+  ) %>%
+  mutate(
+    Concentration_uM = case_when(
+      Compartment %in% c("CA", "CL", "CK") ~ (Concentration * 1000) / mw_pfos,
+      TRUE ~ NA_real_   # urine and feces left NA for now
+    )
+  )
+```
+
+## Plot PBTK
+```{r}
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
+
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"     = "#330597",
+  "0.166" = "#b12a90",
+  "0.5"   = "#d35171",
+  "1"     = "#f68f44",
+  "1.5"   = "#fec029"
+)
+
+pfos_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOS",
+    Tissue != "Feces")
+
+dose_vec <- unique(pfos_obs$Dose)
+time_vec <- unique(pfos_obs$Time)
+tissues_all <- c("Plasma", "Liver", "Kidney")
+pfos_obs <- pfos_obs %>%
+    mutate(uM = as.numeric(trimws(uM)),
+    Tissue = factor(Tissue, levels = tissues_all)) 
+
+tissues_all <- c("CA", "CL", "CK")
+pbtk <- tissue_long %>%
+   filter(!Compartment %in% c("Curine", "Cfeces")) %>%
+  mutate(
+    Tissue = factor(
+      Compartment,
+      levels = tissues_all,
+      labels = c(
+                 "Plasma", 
+                 "Liver", 
+                 "Kidney")
+    )
+  )
+
+
+pfos_obs$Dose_Time <- paste0(pfos_obs$Dose, " (", pfos_obs$Time, ")")
+pbtk$Dose_Time <- paste0(pbtk$Dose, " (", pbtk$Days, ")")
+pbtk <- subset(pbtk, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
+
+plot_pfos <- ggplot() +
+  geom_jitter(
+    data = pfos_obs %>% filter(Time %in% c(28, 56)),
+    aes(x = factor(Dose_Time), y = uM, shape = factor(Sex), color = factor(Dose), fill = factor(Dose)),
+    size = 2, alpha = 0.5, width = 0.1, stroke = 1, 
+  ) +
+  geom_point(
+    data = pbtk %>% filter(Days %in% c(28, 56)),
+    aes(x = factor(Dose_Time), y = Concentration_uM),
+    fill = "red",color = "red", size = 2, 
+  ) +
+  facet_wrap(~ Tissue, scales = "free_y", nrow = 1) +
+  scale_color_manual(
+    name = "Color",
+    values = c(custom_colors_named)
+  ) +
+  scale_fill_manual(
+    name = "Dose",
+    values = custom_colors_named
+  ) +
+  scale_shape_manual(
+    name = "Sex",
+    values = shape_map
+  ) +
+  labs(
+    title = "Predicted vs Observed PFOS Concentrations (PBTK)",
+    x = "Dose (mg/kg)",
+    y = "PFOS Concentration (µM)"
+  ) +
+ # coord_cartesian(ylim = c(-10, 1500)) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    panel.grid.major = element_line(size = 0.5),
+    panel.grid.minor = element_blank())
+
+plot_pfos
+ggsave(filename = "../plots/pfos_chou.png", plot = plot_pfos, width = 12.5, height = 7.5, dpi = 300,bg = "white")
+
+obs_vs_pred_table <- pfos_obs %>%
+  inner_join(
+    pbtk,
+    by = c("Dose_Time", "Tissue")
+  ) %>%
+  mutate(
+    diff_uM      = Concentration_uM - uM,
+    fold_diff    = Concentration_uM / uM,
+    percent_diff = 100 * diff_uM / uM
+  ) %>%
+  select(
+    Dose_Time,
+    Tissue,
+    Observed_uM  = uM,
+    Predicted_uM = Concentration_uM,
+    diff_uM,
+    fold_diff,
+    percent_diff
+  ) %>%
+  arrange(Tissue, desc(fold_diff))
+
+
+tissue_summary <- obs_vs_pred_table %>%
+  group_by(Tissue) %>%
+  summarise(
+    n = n(),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
+    mean_fold  = mean(fold_diff, na.rm = TRUE),
+    times_lower = ifelse(mean_fold < 1, 1 / mean_fold, NA_real_),
+    times_higher = ifelse(mean_fold > 1, mean_fold, NA_real_),
+    .groups = "drop"
+  )
+tissue_summary
+
+replicate_summary <- pfos_obs%>%
+  group_by(Dose, Time, Tissue) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
+```
+
+#HED
+##Load inputs from Chou et al 
+```{r}
+## Input PBPK model (run the mrg code, and then saveRDS(RatPBPK.code, file = "ratPBPK.RDS"))
+micePBPK.code     <- readRDS (file = "../PFOS/Additional files/Results/Workplace/micePBPK.RDS")
+humanPBPK.code    <- readRDS (file = "../PFOS/Additional files/Results/Workplace/humanPBPK.RDS")
+
+## Loading pbpk model (e.g., ratPBPK.code) to the object mod.rat (mcode is a function of loading model in mrgsolve)
+mod.mouse         <- mcode ("micepbpk", micePBPK.code)
+mod.human         <- mcode ("humanpbpk", humanPBPK.code)
+
+## Loading human, rat, mouse, monkey observed data
+Human.obs         <- readRDS(file = "../PFOS/Additional files/Results/Workplace/Human.obs.rds")
+Mouse.obs         <- readRDS(file = "../PFOS/Additional files/Results/Workplace/Mouse.obs.rds")
+
+## Loading human, rat, mouse, monkey MCMC data (posterior parameter values from one of the four MCMC chains)
+Human.MCMC        <- readRDS(file = "../PFOS/Additional files/Results/Workplace/Human.MCMC.rds")
+Mouse.MCMC        <- readRDS(file = "../PFOS/Additional files/Results/Workplace/mouse.MCMC.rds")
+
+## Population mean (u) of prior distribution (this part of the code (lines 39-47) is not needed in this file)
+theta.Human       <- readRDS (file="../PFOS/Additional files/Results/Workplace/theta.Human.Rds")
+theta.Mouse       <- readRDS (file="../PFOS/Additional files/Results/Workplace/theta.Mouse.Rds")
+
+## loading the theta names
+theta.names       <- readRDS(file = "../PFOS/Additional files/Results/Workplace/theta.names.rds")
+which_sig         <- grep("sig", theta.names)
+```
+
+##Wrap for multiple days and doses
+```{r}
+pred.AUC <- function(pars.mouse, pars.human,
+                    dose.mouse,
+                    dose.human,
+                    time.mouse) {
+
+  ## ==============================
+  ## MOUSE SIMULATION (dynamic dose)
+  ## ==============================
+
+  pars.mouse %<>% lapply(exp)
+  names(pars.mouse) <- names(pars.mouse)
+  pars.mouse <- pars.mouse[-which_sig]
+
+  BW.mouse <- 0.02
+  tinterval.mouse <- 24
+  TDoses.mouse <- time.mouse
+
+  PDOSEoral.mouse <- dose.mouse
+  DOSEoral.mouse <- PDOSEoral.mouse * BW.mouse
+
+  ex.mouse <- ev(ID = 1,
+                amt = DOSEoral.mouse,
+                ii = tinterval.mouse,
+                addl = TDoses.mouse - 1,
+                cmt = "AST",
+                replicate = FALSE)
+
+  tsamp.mouse <- tgrid(0,
+                      tinterval.mouse * (TDoses.mouse - 1) + 24,
+                      24)
+
+  out.mouse <- mod.mouse %>%
+    param(pars.mouse) %>%
+    Req(Plasma, AUC_CA, AUC_CL) %>%
+    update(atol = 1E-10, maxsteps = 10000) %>%
+    mrgsim_d(data = ex.mouse, tgrid = tsamp.mouse)
+
+  outdf.mouse <- cbind.data.frame(
+    Time   = out.mouse$time / 24,
+    CA     = out.mouse$Plasma,
+    AUC.CA  = out.mouse$AUC_CA,
+    AUC.CL  = out.mouse$AUC_CL
+  )
+
+  ## ==============================
+  ## HUMAN SIMULATION (dynamic dose)
+  ## ==============================
+
+  pars.human %<>% lapply(exp)
+  names(pars.human) <- names(pars.human)
+  pars.human <- pars.human[-which_sig]
+
+  BW.human <- 82.3
+  tinterval.human <- 24
+  TDoses.human <- 365 * 25
+
+  PDOSEoral.human <- dose.human
+  DOSEoral.human <- PDOSEoral.human * BW.human
+
+  ex.human <- ev(ID = 1,
+                amt = DOSEoral.human,
+                ii = tinterval.human,
+                addl = TDoses.human - 1,
+                cmt = "AST",
+                replicate = FALSE)
+
+  tsamp.human <- tgrid(0,
+                      tinterval.human * (TDoses.human - 1) + 24,
+                      24)
+
+  out.human <- mod.human %>%
+    param(pars.human) %>%
+    Req(Plasma, AUC_CA, AUC_CL) %>%
+    update(atol = 1E-10, rtol = 1e-10, maxsteps = 50000) %>%
+    mrgsim_d(data = ex.human, tgrid = tsamp.human)
+
+  outdf.human <- cbind.data.frame(
+    Time   = out.human$time / 24,
+    CA     = out.human$Plasma,
+    AUC.CA  = out.human$AUC_CA,
+    AUC.CL  = out.human$AUC_CL
+  )
+
+  return(list(
+    mouse = outdf.mouse,
+    human = outdf.human
+  ))
+}
+
+doses <- c(0.166, 0.5, 1, 1.5)
+times <- c(28, 56)
+nsim  <- 5
+
+AUC <- array(NA, dim = c(nsim, length(doses), length(times), 4))
+
+for (d in seq_along(doses)) {
+  for (t in seq_along(times)) {
+    for (i in 1:nsim) {
+
+      j <- i
+
+      pars.mouse <- Mouse.MCMC$pars[j,]
+      pars.human  <- Human.MCMC$pars[j,]
+
+      ## internal-to-internal unit scaling
+      pars.human[2] <- pars.human[2] - log(1000)
+      pars.human[4] <- pars.human[4] - log(1000)
+
+      MC.HED <- pred.AUC(
+        pars.mouse = pars.mouse,
+        pars.human = pars.human,
+        dose.mouse = doses[d],
+        dose.human = doses[d],   # same dose for human reference (or change)
+        time.mouse = times[t]
+      )
+
+      AUC[i, d, t, 1] <- tail(MC.HED$mouse$AUC.CA, 1)
+      AUC[i, d, t, 2] <- tail(MC.HED$human$AUC.CA, 1)
+
+      AUC[i, d, t, 3] <- tail(MC.HED$mouse$AUC.CL, 1)
+      AUC[i, d, t, 4] <- tail(MC.HED$human$AUC.CL, 1)
+
+      cat("dose =", doses[d],
+          "time =", times[t],
+          "iter =", i, "\n")
+    }
+  }
+}
+
+df <- as.data.frame(
+  expand.grid(
+    sim  = 1:nsim,
+    dose = doses,
+    time = times
+  )
+)
+
+df$AUC.CA.mouse <- as.vector(AUC[,,,1])
+df$AUC.CA.human <- as.vector(AUC[,,,2])
+df$AUC.CL.mouse <- as.vector(AUC[,,,3])
+df$AUC.CL.human <- as.vector(AUC[,,,4])
+
+df$Avg.CA.mouse  <- df$AUC.CA.mouse / (df$time * 24)
+df$Avg.CA.human  <- df$AUC.CA.human / (365 * 25 * 24)
+
+df$Avg.CL.mouse  <- df$AUC.CL.mouse / (df$time * 24)
+df$Avg.CL.human   <- df$AUC.CL.human / (365 * 25 * 24)
+
+df$HED.CA.human <- (df$Avg.CA.mouse / df$Avg.CA.human) * df$dose
+
+ASC.range <- cbind.data.frame(
+  Median.CA = quantile(df$Avg.CA.mouse, probs = 0.5, na.rm = TRUE),
+  lower.CA  = quantile(df$Avg.CA.mouse, probs = 0.025, na.rm = TRUE),
+  upper.CA  = quantile(df$Avg.CA.mouse, probs = 0.975, na.rm = TRUE)
+)
+
+
+oral_equiv_results <- df %>%
+  group_by(dose, time) %>%
+  summarise(
+    Median_HED = median(HED.CA.human, na.rm = TRUE),
+    Lower_HED  = quantile(HED.CA.human, 0.025, na.rm = TRUE),
+    Upper_HED  = quantile(HED.CA.human, 0.975, na.rm = TRUE),
+
+    Median_ASC_mouse = median(Avg.CA.mouse, na.rm = TRUE),
+    Median_ASC_human  = median(Avg.CA.human, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!(time == 28 & dose %in% c(0.166, 0.5, 1)))
+
+zero_rows <- data.frame(
+  Median_HED     = 0,
+  Lower_HED     = 0,
+  Upper_HED     = 0,
+  Median_ASC_mouse = 0,
+  Median_ASC_human = 0, 
+  time   = c(56, 28),
+  dose   = 0
+)
+
+oral_equiv_results <- bind_rows(oral_equiv_results, zero_rows)
+```
+
+##PFOS Oral equiv
+```{r}
+
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"   = "#330597",
+  "0.166"   = "#b12a90",
+  "0.5"     = "#d35171",
+  "1"       = "#f68f44",
+  "1.5"     = "#fec029")
+
+
+pfos_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOS") %>%
+  mutate(uM = as.numeric(trimws(uM)))
+
+pfos_biodata <- combined %>%
+  filter(Compound == "PFOS") 
+
+oral_equiv_results$Dose_Time <- paste0(oral_equiv_results$dose, " (", oral_equiv_results$time, ")")
+
+p <- ggplot() +
+  # Points: colored by Dose
+  geom_point(
+    data = oral_equiv_results, 
+    aes(
+      x = factor(Dose_Time),
+      y = Median_HED,
+      color = factor(dose),
+      fill  = factor(dose),
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+geom_hline(
+  data = pfos_biodata,
+  aes(yintercept = Intake_mg_kg_day),
+  color = c("red", "blue"),
+  linetype = "dashed",
+  linewidth = 0.8
+)+
+  # Horizontal lines: colored by Source
+geom_rect(
+  data = pfos_biodata,
+  aes(
+    ymin = Intake_low,
+    ymax = Intake_high
+  ),
+  xmin = -Inf,
+  xmax = Inf,
+  fill = c("red", "blue"),
+  alpha = 0.4
+) +
+  # Log10 y-axis
+ scale_y_log10() +
+  # Point colors for Dose
+  scale_color_manual(
+    name   = "Dose (mg/kg/day)",
+    values = custom_colors_named
+  ) +
+  scale_fill_manual(
+  name = "Dose",
+  values = custom_colors_named
+  ) +
+  labs(
+    title = "Predicted vs Observed PFOS",
+    x = "Dose (mg/kg/day)",
+    y = "mg/kg/day"
+  ) +
+
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    panel.grid.major = element_line(linewidth = 0.4),
+    panel.grid.minor = element_blank()
+  )
+
+p
+
+ggsave(filename = "../plots/pfos_hed_Chou.png", plot = p, width = 9, height = 3, dpi = 300,bg = "white")
+```
+```{r}
+# PFOS HED per individual mouse (range)
+HED_pfos_individual <- pfos_obs %>%
+  filter(Tissue == "Plasma") %>%
+  mutate(hed = mg_L * 4.7355e-06 * 24) %>%   # HED per observation
+  group_by(Dose, Time, Mouse.ID) %>%
+  dplyr::rename(dose = Dose, time =Time)
+
+df_joined <- HED_pfos_individual %>%
+  left_join(df %>% select(dose, time, Avg.CA.human),
+            by = c("dose", "time")) 
+
+df_joined <- df_joined %>%
+  mutate(HED.CA.human = (mg_L / Avg.CA.human) * dose)
+
+
+
+oral_equiv_results <- df_joined %>%
+  group_by(dose, time) %>%
+  summarise(
+    Median_HED = median(HED.CA.human, na.rm = TRUE),
+    Lower_HED  = quantile(HED.CA.human, 0.025, na.rm = TRUE),
+    Upper_HED  = quantile(HED.CA.human, 0.975, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!(time == 28 & dose %in% c(0.166, 0.5, 1)))
+
+oral_equiv_results$Dose_Time <- paste0(oral_equiv_results$dose, " (", oral_equiv_results$time, ")")
+
+p <- ggplot() +
+  # Points: colored by Dose
+  geom_point(
+    data = oral_equiv_results, 
+    aes(
+      x = factor(Dose_Time),
+      y = Median_HED,
+      color = factor(dose),
+      fill  = factor(dose),
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+geom_hline(
+  data = pfos_biodata,
+  aes(yintercept = Intake_mg_kg_day),
+  color = c("red", "blue"),
+  linetype = "dashed",
+  linewidth = 0.8
+)+
+  # Horizontal lines: colored by Source
+geom_rect(
+  data = pfos_biodata,
+  aes(
+    ymin = Intake_low,
+    ymax = Intake_high
+  ),
+  xmin = -Inf,
+  xmax = Inf,
+  fill = c("red", "blue"),
+  alpha = 0.4
+) +
+  # Log10 y-axis
+ scale_y_log10() +
+  # Point colors for Dose
+  scale_color_manual(
+    name   = "Dose (mg/kg/day)",
+    values = custom_colors_named
+  ) +
+  scale_fill_manual(
+  name = "Dose",
+  values = custom_colors_named
+  ) +
+  labs(
+    title = "Predicted vs Observed PFOS",
+    x = "Dose (mg/kg/day)",
+    y = "mg/kg/day"
+  ) +
+
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    panel.grid.major = element_line(linewidth = 0.4),
+    panel.grid.minor = element_blank()
+  )
+
+p
+
+```
+

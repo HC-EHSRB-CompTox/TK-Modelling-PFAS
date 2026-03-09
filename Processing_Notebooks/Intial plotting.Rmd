@@ -336,15 +336,15 @@ liver_pfoa <- subset(liver) %>%
   select("Mouse.ID", "PFOA", "Group", "Sex", "PFAS", "Time")
 
 #imported ng/g
-feces_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Feces_PFAS_values_fixed_56d.csv" )
-feces_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Feces_PFAS_values_fixed_28d.csv" )
+feces_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_56d.csv" )
+feces_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_28d.csv" )
 
 feces_28 <- feces_28 %>% mutate(Time = 28)
 feces_56 <- feces_56 %>% mutate(Time = 56)
 feces <- rbind(feces_28, feces_56)
 
 feces <- feces %>% 
-  mutate(across(PFOA:X8_2.FTS, ~ .x * 1e-6))  #NG/G TO MG/KG
+  mutate(across(PFOA:X8_2.FTS, ~ .x * 1e-3))  #NG/G TO MG/KG
 
 feces <- feces %>%
   mutate(Group2 = if_else(Group %in% c("Naive", "Vehicle"),
@@ -412,7 +412,7 @@ p <- ggplot(pfos, aes(x = PFOS_liver, y = PFOS_feces)) +
     panel.grid.minor = element_blank()
   )
 
-print(p)
+p
 ggsave(filename = "../plots/fecesxliver_pfos.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
 
 p <- ggplot(pfoa, aes(x = PFOA_liver, y = PFOA_feces)) +
@@ -441,7 +441,7 @@ p <- ggplot(pfoa, aes(x = PFOA_liver, y = PFOA_feces)) +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank()
   )
-print(p)
+p
 ggsave(filename = "../plots/fecesxliver_pfoa.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
 replicate_summary <- pfoa%>%
   group_by(Group, Time) %>%  
@@ -537,7 +537,7 @@ p <- ggplot(pfos, aes(x = PFOS_plasma, y = PFOS_feces)) +
     panel.grid.minor = element_blank()
   )
 
-print(p)
+p
 ggsave(filename = "../plots/fecesxplasma_pfos.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
 
 p <- ggplot(pfoa, aes(x = PFOA_plasma, y = PFOA_feces)) +
@@ -566,7 +566,7 @@ p <- ggplot(pfoa, aes(x = PFOA_plasma, y = PFOA_feces)) +
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank()
   )
-print(p)
+p
 ggsave(filename = "../plots/fecesxplasma_pfoa.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
 
 replicate_summary <- pfoa%>%
@@ -640,7 +640,7 @@ p <- ggplot(df_all,
          shape = Sex,
          group = interaction(Mouse.ID, Chemical)
        )) +
-  geom_point(
+  geom_jitter(
    size = 2, alpha = 0.5, width = 0.1, stroke = 1
   ) +
   geom_line(
@@ -696,5 +696,763 @@ mean <- df_all %>%
   summarise(
     n = n(),
     Percent_Dose_Feces = mean(Percent_Dose_Feces, na.rm = TRUE)
+  )
+```
+
+#Load 28d kidney
+```{r}
+#Imported in ng/g and i removed the reruns (very similar just used first run)
+kidney_28  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Kidney_28d.csv")
+
+doses <- c("Naive", "Vehicle", " PFOA 1.5",  " PFOS 1.5")
+
+#Load MDLs (so many i had to do it differently this time)
+mdls_28  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/MDLS_Kidney_28d.csv")
+chem_cols <- colnames(mdls_28)[4:ncol(mdls_28)]
+kidney_28_fixed <-kidney_28
+
+for (chem in chem_cols) {
+  
+  idx <- grepl("^<", kidney_28_fixed[[chem]])
+  
+  kidney_28_fixed[[chem]][idx] <- 0.5 * mdls_28[[chem]][idx]
+}
+
+write.csv(kidney_28_fixed, file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_28d.csv", row.names = FALSE)
+
+```
+
+##Plotting 28d Kidney Data
+```{r}
+kidney_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_28d.csv")
+
+other_pfas <- setdiff(pfas_cols, c("PFOS", "PFOA"))
+plasma_colors <- viridis(length(other_pfas), option = "plasma")
+names(plasma_colors) <- other_pfas
+
+custom_colors <- c(
+  "PFOS" = "red",   
+  "PFOA" = "blue",    
+  plasma_colors          
+)
+
+group_levels <- c(
+  "Naive", "Vehicle",
+  paste("PFOS", c("1.5")),
+  paste("PFOA", c("1.5"))
+)
+
+data_combined_long <- kidney_28 %>%
+  pivot_longer(
+    cols = all_of(pfas_cols),
+    names_to = "PFAS_name",
+    values_to = "PFAS_conc"
+  ) %>%
+  filter(!is.na(PFAS_conc)) %>%
+  mutate(
+    PFAS_conc = as.numeric(PFAS_conc),
+    group = factor(Group, levels = group_levels),
+    PFAS_name = factor(PFAS_name, levels = names(custom_colors)) 
+  )
+average_pfas <- kidney_28 %>%
+  group_by(Group) %>%
+  summarise(
+    Mean_PFOS = format(mean(PFOS, na.rm = TRUE), scientific = FALSE),
+    Mean_PFOA = format(mean(PFOA, na.rm = TRUE), scientific = FALSE),
+    .groups = "drop"
+  )
+
+print(average_pfas)
+shape_map <- c(`Male` = 24, `Female` = 21)
+
+
+data_combined_long <- subset(data_combined_long, !(Group %in% "Naive"))
+# Plot
+p <- ggplot(data_combined_long, aes(x = group, y = PFAS_conc)) +
+  geom_jitter(aes(color = factor(PFAS_name),
+                  fill = factor(PFAS_name),
+                  shape = Sex),
+              size = 2, alpha = 0.5, stroke = 1) +
+  scale_color_manual(values = custom_colors, name = "PFAS_name") +
+  scale_fill_manual(values = custom_colors, name = "PFAS_name") +
+  scale_shape_manual(values = shape_map, name = "Sex") +
+ coord_cartesian(ylim = c(0, 150000)) +  
+  theme_minimal() +
+  theme(
+        text = element_text(family = "Arial", size = 12),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none",
+      panel.grid.major = element_line(size = 0.5),
+      panel.grid.minor = element_blank()
+  )
+print(p)
+ggsave(filename = "../plots/Kidney_28d.png", plot = p, width = 5, height = 5, dpi = 300,bg = "white")
+
+replicate_summary <- kidney_28 %>%
+  group_by(Group) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
+
+```
+
+#Load 56d kidney
+```{r}
+#IMPORTED ng/g
+kidney_56  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Kidney_56d.csv")
+
+#Load MDLs (so many i had to do it differently this time)
+mdls_56  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/MDLS_Kidney_56d.csv")
+
+chem_cols <- colnames(mdls_56)[4:ncol(mdls_56)]
+
+kidney_56_fixed <-kidney_56
+
+for (chem in chem_cols) {
+  
+  idx <- grepl("^<", kidney_56_fixed[[chem]])
+  
+  kidney_56_fixed[[chem]][idx] <- 0.5 * mdls_56[[chem]][idx]
+}
+
+
+write.csv(kidney_56_fixed, file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_56d.csv", row.names = FALSE)
+```
+
+##Plotting 56d Kidney Data
+```{r}
+kidney_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_56d.csv" )
+pfas_cols <- c(
+  "PFOA", "PFOS", "PFBA", "PFPeA", "PFHxA", "PFHpA", "PFNA", "PFDA", "PFUdA", "PFDoA", "PFTrDA", "PFTeDA", "HFPO.DA", "DONA","PFBS", "PFPeS", "PFHxS", "PFHpS", "PFNS", "PFDS",
+  "X4_2.FTS", "X6_2_FTS", "X8_2.FTS")
+other_pfas <- setdiff(pfas_cols, c("PFOS", "PFOA"))
+plasma_colors <- viridis(length(other_pfas), option = "plasma")
+names(plasma_colors) <- other_pfas
+
+custom_colors <- c(
+  "PFOS" = "red",   
+  "PFOA" = "blue",   
+  plasma_colors          
+)
+
+group_levels <- c("Naive", "Vehicle", "PFOS 0.166", "PFOS 0.5", "PFOS 1", "PFOS 1.5", "PFOA 0.166", "PFOA 0.5", "PFOA 1", "PFOA 1.5")
+
+
+data_combined_long <- kidney_56 %>%
+  pivot_longer(
+    cols = all_of(pfas_cols),
+    names_to = "PFAS_name",
+    values_to = "PFAS_conc"
+  ) %>%
+  filter(!is.na(PFAS_conc)) %>%
+  mutate(
+    PFAS_conc = as.numeric(PFAS_conc),
+    group = factor(Group, levels = group_levels),
+    PFAS_name = factor(PFAS_name, levels = names(custom_colors)) 
+  )
+
+average_pfas <- kidney_56 %>%
+  group_by(Group) %>%
+  summarise(
+    Mean_PFOS = format(mean(PFOS, na.rm = TRUE), scientific = FALSE),
+    Mean_PFOA = format(mean(PFOA, na.rm = TRUE), scientific = FALSE),
+    .groups = "drop"
+  )
+
+print(average_pfas)
+
+shape_map <- c(`Male` = 24, `Female` = 21)
+data_combined_long <- subset(data_combined_long, !(Group %in% "Naive"))
+# Plot
+p <- ggplot(data_combined_long, aes(x = group, y = PFAS_conc)) +
+  geom_jitter(aes(color = factor(PFAS_name),
+                  fill = factor(PFAS_name),
+                  shape = Sex),
+              size = 2, alpha = 0.5, stroke = 1) +
+  scale_color_manual(values = custom_colors, name = "PFAS_name") +
+  scale_fill_manual(values = custom_colors, name = "PFAS_name") +
+  scale_shape_manual(values = shape_map, name = "Sex") +
+ coord_cartesian(ylim = c(0, 150000)) +  
+  theme_minimal() +
+  theme(
+        text = element_text(family = "Arial", size = 12),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none",
+      panel.grid.major = element_line(size = 0.5),
+      panel.grid.minor = element_blank()
+  )
+print(p)
+ggsave(filename = "../plots/kidney_56_conc.png", plot = p, width = 12.5, height = 5, dpi = 300,bg = "white")
+
+replicate_summary <- kidney_56%>%
+  group_by(Group) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
+```
+
+#Correlation between plasma and kidney
+```{r}
+#########56 day
+#Imported in mg/kg
+plasma_56 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Plasma_PFAS_values_fixed_56d.csv")
+plasma_28 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/plasma_PFAS_values_fixed_28d.csv")
+plasma_28 <- plasma_28 %>% mutate(Time = 28)
+plasma_56 <- plasma_56 %>% mutate(Time = 56)
+plasma <- rbind(plasma_28, plasma_56)
+
+
+plasma <- plasma %>%
+  mutate(Group2 = if_else(Group %in% c("Naive", "Vehicle"),
+                         paste("control", Group),
+                         Group))
+plasma <- plasma %>%
+  separate(Group2, into = c("PFAS", "Dose"), sep = " ", remove = T)
+
+controls <- plasma %>%
+  filter(Dose %in% c("Naive", "Vehicle")) %>%
+  slice(rep(1:n(), each = 2)) %>%
+  mutate(PFAS = rep(c("PFOS", "PFOA"), times = n() / 2))
+
+plasma <- plasma %>%
+  filter(!(Dose %in% c("Naive", "Vehicle"))) %>%
+  bind_rows(controls)
+
+plasma_pfos <- subset(plasma) %>%
+  select("Mouse.ID", "PFOS", "Group", "Sex", "PFAS", "Time")
+plasma_pfoa <- subset(plasma) %>%
+  select("Mouse.ID", "PFOA", "Group", "Sex", "PFAS", "Time")
+
+#imported ng/g
+kidney_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_56d.csv" )
+kidney_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_28d.csv" )
+
+kidney_28 <- kidney_28 %>% mutate(Time = 28)
+kidney_56 <- kidney_56 %>% mutate(Time = 56)
+kidney <- rbind(kidney_28, kidney_56)
+
+kidney <- kidney %>% 
+  mutate(across(PFOA:X8_2.FTS, ~ .x* 1e-3))  #NG/G TO MG/KG
+
+kidney <- kidney %>%
+  mutate(Group2 = if_else(Group %in% c("Naive", "Vehicle"),
+                         paste("control", Group),
+                         Group))
+kidney <- kidney %>%
+  separate(Group2, into = c("PFAS", "Dose"), sep = " ", remove = T)
+
+controls <- kidney %>%
+  filter(Dose %in% c("Naive", "Vehicle")) %>%
+  slice(rep(1:n(), each = 2)) %>%
+  mutate(PFAS = rep(c("PFOS", "PFOA"), times = n() / 2))
+
+kidney <- kidney %>%
+  filter(!(Dose %in% c("Naive", "Vehicle"))) %>%
+  bind_rows(controls)
+
+kidney_pfos <- subset(kidney) %>%
+  select("Mouse.ID", "PFOS", "Group", "Sex", "PFAS", "Time")
+kidney_pfoa <- subset(kidney) %>%
+  select("Mouse.ID", "PFOA", "Group", "Sex", "PFAS", "Time")
+
+pfos<- inner_join(
+  kidney_pfos,
+  plasma_pfos,
+  by = c("Mouse.ID","Group", "Sex", "PFAS", "Time"),
+  suffix = c("_kidney","_plasma")
+) 
+pfos <- subset(pfos, PFAS == "PFOS")
+
+pfoa<- inner_join(
+  kidney_pfoa,
+  plasma_pfoa,
+  by = c("Mouse.ID","Group", "Sex", "PFAS", "Time"),
+  suffix = c( "_kidney","_plasma")
+) 
+pfoa <- subset(pfoa, PFAS == "PFOA")
+
+pfos <- subset(pfos, !(Group %in% "Naive"))
+pfoa <- subset(pfoa, !(Group %in% "Naive"))
+
+p <- ggplot(pfos, aes(x = PFOS_plasma, y = PFOS_kidney)) +
+  # Single lm line
+  geom_smooth(method = "lm", linetype = "dashed", color = "red", inherit.aes = FALSE,
+              aes(x = PFOS_plasma, y = PFOS_kidney)) +
+    # Jittered points
+  geom_jitter(aes(shape = factor(Time), color = factor(Group), fill = factor(Group)),
+              size = 3, alpha = 0.5, stroke = 1) +
+  # Labels
+  labs(title = "Correlation between plasma and Kidney",
+       x = "plasma (mg/L)",
+       y = "kidney (mg/kg)") +
+  
+  # Manual scales
+  scale_color_manual(name = "Group", values = custom_colors_named) +
+  scale_fill_manual(name = "Group", values = custom_colors_named) +
+  scale_shape_manual(name = "Time (days)", values = shape_map) +
+  
+  # Theme
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    panel.grid.major = element_line(size = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+p
+ggsave(filename = "../plots/kidneyxplasma_pfos.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
+
+p <- ggplot(pfoa, aes(x = PFOA_plasma, y = PFOA_kidney)) +
+  # Single lm line
+  geom_smooth(method = "lm", linetype = "dashed", color = "red", inherit.aes = FALSE,
+              aes(x = PFOA_plasma, y = PFOA_kidney)) +
+    # Jittered points
+  geom_jitter(aes(shape = factor(Time), color = factor(Group), fill = factor(Group)),
+              size = 3, alpha = 0.5, stroke = 1) +
+  # Labels
+  labs(title = "Correlation between plasma and Kidney",
+       x = "plasma (mg/L)",
+       y = "kidney (mg/kg)") +
+  
+  # Manual scales
+  scale_color_manual(name = "Group", values = custom_colors_named) +
+  scale_fill_manual(name = "Group", values = custom_colors_named) +
+  scale_shape_manual(name = "Time (days)", values = shape_map) +
+  
+  # Theme
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    panel.grid.major = element_line(size = 0.5),
+    panel.grid.minor = element_blank()
+  )
+p
+ggsave(filename = "../plots/kidneyxplasma_pfoa.png", plot = p, width = 7, height = 6, dpi = 300,bg = "white")
+
+replicate_summary <- pfoa%>%
+  group_by(Group, Time) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
+
+
+replicate_summary <- pfos%>%
+  group_by(Group, Time) %>%  
+  summarise(n = n(), .groups = "drop")
+min_n <- min(replicate_summary$n)
+max_n <- max(replicate_summary$n)
+cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
+```
+
+#Load my data
+```{r}
+mw_pfos <- 500.13  # g/mol for PFOS
+mw_pfoa <- 414.07  # g/mol for PFOA
+
+#Imported in mg/L 
+plasma_28 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/plasma_PFAS_values_fixed_28d.csv")
+plasma_56 <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Plasma_PFAS_values_fixed_56d.csv")
+
+#Imported in mg/kg
+liver_28  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Liver_PFAS_values_fixed_28d.csv")
+liver_56  <- read.csv("C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Input/Liver_PFAS_values_fixed_56d.csv")
+
+#Imported ng/g
+feces_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_56d.csv" )
+feces_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Feces_PFAS_values_fixed_28d.csv" )
+
+
+#Imported ng/g
+kidney_56 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_56d.csv" )
+kidney_28 <- read.csv(file = "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modelling-PFAS/Output/Kidney_PFAS_values_fixed_28d.csv" )
+
+
+
+process_pfas_file <- function(df, tissue, timepoint) {
+  df <- df %>% filter(Group != "Naive")
+  df_vehicle <- df %>%
+    filter(Group == "Vehicle") %>%
+    mutate(
+      PFAS_type = "PFOA",
+      PFAS_conc = PFOA,
+      Tissue = tissue,
+      Time = timepoint
+    )
+  df_vehicle_dup <- df_vehicle %>%
+    mutate(
+      PFAS_type = "PFOS",
+      PFAS_conc = PFOS
+    )
+  df_vehicles_all <- bind_rows(df_vehicle, df_vehicle_dup)
+  df_exposed <- df %>%
+    filter(Group != "Vehicle") %>%
+    mutate(
+      PFAS_type = case_when(
+        str_starts(Group, "PFOS") ~ "PFOS",
+        str_starts(Group, "PFOA") ~ "PFOA",
+        TRUE ~ NA_character_
+      ),
+      PFAS_conc = case_when(
+        PFAS_type == "PFOS" ~ PFOS,
+        PFAS_type == "PFOA" ~ PFOA,
+        TRUE ~ NA_real_
+      ),
+      Tissue = tissue,
+      Time = timepoint
+    )
+  df_final <- bind_rows(df_vehicles_all, df_exposed) %>%
+    dplyr::select(Mouse.ID, Group, PFAS_type, PFAS_conc, Tissue, Time, Sex)
+  return(df_final)
+}
+
+plasma_28_clean <- process_pfas_file(plasma_28, tissue = "Plasma", timepoint = 28)
+plasma_56_clean <- process_pfas_file(plasma_56, tissue = "Plasma", timepoint = 56)
+liver_28_clean  <- process_pfas_file(liver_28,  tissue = "Liver",  timepoint = 28)
+liver_56_clean  <- process_pfas_file(liver_56,  tissue = "Liver",  timepoint = 56)
+feces_28_clean  <- process_pfas_file(feces_28,  tissue = "Feces",  timepoint = 28)
+feces_56_clean  <- process_pfas_file(feces_56,  tissue = "Feces",  timepoint = 56)
+kidney_28_clean  <- process_pfas_file(kidney_28,  tissue = "Kidney",  timepoint = 28)
+kidney_56_clean  <- process_pfas_file(kidney_56,  tissue = "Kidney",  timepoint = 56)
+
+pfas_obs_all <- bind_rows(plasma_28_clean, plasma_56_clean, liver_28_clean, liver_56_clean,feces_28_clean,feces_56_clean, kidney_56_clean, kidney_28_clean)
+
+
+pfas_obs_all <- pfas_obs_all %>%
+  mutate(
+    Dose = case_when(
+      Group == "Vehicle" ~ 0,
+      TRUE ~ as.numeric(str_extract(Group, "\\d+\\.?\\d*"))
+    ),
+    mw = case_when(
+      PFAS_type == "PFOA" ~ mw_pfoa,
+      PFAS_type == "PFOS" ~ mw_pfos,
+      TRUE ~ NA_real_
+    ),
+    PFAS_mg_L_eq = case_when(
+      Tissue == "Plasma" ~ PFAS_conc,                 # already mg/L
+      Tissue == "Liver" ~ PFAS_conc,              # mg/kg ≈ mg/L
+      Tissue == "Feces" ~ PFAS_conc * 1e-3,            # ng/g → mg/kg and same # mg/kg ≈ mg/L
+      Tissue == "Kidney" ~ PFAS_conc * 1e-3,            # ng/g → mg/kg and same # mg/kg ≈ mg/L
+      TRUE ~ NA_real_
+    ),
+
+    # ---- CONVERT TO µM ----
+    uM = PFAS_mg_L_eq / mw * 1000,
+
+    # Optional reporting columns
+    mg_L = ifelse(Tissue == "Plasma", PFAS_conc, NA_real_),
+    ng_L = ifelse(Tissue == "Plasma", PFAS_conc * 1e6, NA_real_),
+    mg_kg = case_when(
+  Tissue == "Liver"  ~ PFAS_conc,            # already mg/kg
+  Tissue == "Kidney" ~ PFAS_conc * 1e-3,     # ng/g → mg/kg
+  Tissue == "Feces"  ~ PFAS_conc * 1e-3,     # ng/g → mg/kg
+  TRUE ~ NA_real_
+)
+  ) %>%
+  select(-mw)
+write.csv(pfas_obs_all,"../Output/observed_data.csv")
+```
+
+#HED simple EPA calc
+```{r}
+#HED = average serum concentration (mg/L) × CL, where CL 81 (L/kg bw/day)
+
+pfas_obs_all <- read.csv("../Output/observed_data.csv")
+pfos_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOS") %>%
+  mutate(mg_L = as.numeric(trimws(mg_L)))
+#PFOA
+pfoa_obs <- pfas_obs_all %>%
+  filter(PFAS_type == "PFOA") %>%
+  mutate(mg_L = as.numeric(trimws(mg_L)))
+
+# PFOS HED per individual mouse (range)
+
+HED_pfos_individual <- pfos_obs %>%
+  filter(Tissue == "Plasma") %>%
+  mutate(hed = mg_L * 4.7355e-06	*24	) %>%      # HED per observation
+  group_by(Dose, Time, Mouse.ID)          # keep individual mice
+
+HED_pfos_range <- HED_pfos_individual %>%
+  summarise(
+    hed_mean  = mean(hed, na.rm = TRUE),
+    hed_median = median(hed, na.rm = TRUE),
+    hed_min   = min(hed, na.rm = TRUE),
+    hed_max   = max(hed, na.rm = TRUE),
+    hed_q25   = quantile(hed, 0.25, na.rm = TRUE),
+    hed_q75   = quantile(hed, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# PFOA HED per individual mouse (range)
+
+HED_pfoa_individual <- pfoa_obs %>%
+  filter(Tissue == "Plasma") %>%
+  mutate(hed = mg_L * 5.5615e-06	*24) %>%
+  group_by(Dose, Time, Mouse.ID)
+
+HED_pfoa_range <- HED_pfoa_individual %>%
+  summarise(
+    hed_mean  = mean(hed, na.rm = TRUE),
+    hed_median = median(hed, na.rm = TRUE),
+    hed_min   = min(hed, na.rm = TRUE),
+    hed_max   = max(hed, na.rm = TRUE),
+    hed_q25   = quantile(hed, 0.25, na.rm = TRUE),
+    hed_q75   = quantile(hed, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+HED_pfoa_individual$Dose_Time <- paste0(HED_pfoa_individual$Dose, " (", HED_pfoa_individual$Time, ")")
+HED_pfos_individual$Dose_Time <- paste0(HED_pfos_individual$Dose, " (", HED_pfos_individual$Time, ")")
+```
+## CHMS/Olsen et al
+```{r}
+#load in total data in ng/ml 2018-19, total, 3-79
+chms <- data.frame(
+  Compound = c("PFOS", "PFOA"),
+  GeometricMean = c(2.5, 1.2 ),
+  CI_Lower = c(2.3, 1.1),
+  CI_Upper = c(2.8, 1.3)
+)
+
+chms <- chms %>%
+  mutate(
+    # ng/mL → mg/L
+    C_plasma_mg_L = GeometricMean * 1e-3,
+
+    CL_L_kg_day = case_when(
+      # imported as L/h/KG 
+      Compound == "PFOS" ~ 4.7355e-06	*24	, 
+      Compound == "PFOA" ~ 5.5615e-06	*24
+    ),
+
+    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
+
+    Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
+    Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
+  )
+
+#https://pmc.ncbi.nlm.nih.gov/articles/PMC1964923/
+#imported as ng/ml  arithmetric mean 
+olsen <- data.frame(
+  Compound = c("PFOS", "PFOA"),
+  GeometricMean = c(799, 691),
+  CI_Lower = c(145, 72),
+  CI_Upper = c(3490, 5200)
+)
+olsen <- olsen %>%
+  mutate(
+    # ng/mL → mg/L
+    C_plasma_mg_L = GeometricMean * 1e-3,
+
+    CL_L_kg_day = case_when(
+      # imported as L/h/KG 
+      Compound == "PFOS" ~ 4.7355e-06	*24	, 
+      Compound == "PFOA" ~ 5.5615e-06	*24
+    ),
+
+    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
+
+    Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
+    Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
+  )
+combined <- rbind(olsen, chms)
+
+```
+
+
+##PFOS Oral equiv
+```{r}
+pfos_biodata <- combined %>%
+  filter(Compound == "PFOS") 
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"   = "#330597",
+  "0.166"   = "#b12a90",
+  "0.5"     = "#d35171",
+  "1"       = "#f68f44",
+  "1.5"     = "#fec029")
+
+p <- ggplot() +
+  geom_hline(
+  data = pfos_biodata,
+  aes(yintercept = Intake_mg_kg_day),
+  color = c("red", "blue"),
+  linetype = "dashed",
+  linewidth = 0.8
+)+
+  # Horizontal lines: colored by Source
+geom_rect(
+  data = pfos_biodata,
+  aes(
+    ymin = Intake_low,
+    ymax = Intake_high
+  ),
+  xmin = -Inf,
+  xmax = Inf,
+  fill = c("red", "blue"),
+  alpha = 0.4
+) +
+  # Points: colored by Dose
+  geom_jitter(
+    data = HED_pfos_individual, 
+    aes(
+      x = factor(Dose_Time),
+      y = hed,
+      shape =Sex,
+      color = factor(Dose),
+      fill  = factor(Dose),
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+
+  # Log10 y-axis
+scale_y_log10(
+  limits = c(1e-8, 1e0),
+  breaks = 10^seq(-8, 0, by = 2)
+) +
+  # Point colors for Dose
+  scale_color_manual(
+    name   = "Dose (mg/kg/day)",
+    values = custom_colors_named
+  ) +
+  scale_fill_manual(
+  name = "Dose",
+  values = custom_colors_named
+  ) +
+    scale_shape_manual(
+    name = "Sex",
+    values = shape_map
+  ) +
+  labs(
+    title = "Predicted vs Observed PFOS",
+    x = "Dose (mg/kg/day)",
+    y = "mg/kg/day"
+  ) +
+
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    panel.grid.major = element_line(linewidth = 0.4),
+    panel.grid.minor = element_blank()
+  )
+
+p
+
+ggsave(filename = "../plots/pfos_hed.png", plot = p, width = 10, height = 4, dpi = 300,bg = "white")
+
+hed_summary_RD <- HED_pfos_individual %>%
+  group_by(Dose, Time) %>%
+  summarise(
+    mean = mean(hed, na.rm = TRUE),
+    median = median(hed, na.rm = TRUE),
+    min = min(hed, na.rm = TRUE),
+    max = max(hed, na.rm = TRUE),
+    q25 = quantile(hed, 0.25, na.rm = TRUE),
+    q75 = quantile(hed, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+##PFOA Oral equiv
+```{r}
+pfoa_biodata <- combined %>%
+  filter(Compound == "PFOA") 
+shape_map <- c(`Male` = 24, `Female` = 21)
+custom_colors_named <- c(
+  "0"   = "#330597",
+  "0.166"   = "#b12a90",
+  "0.5"     = "#d35171",
+  "1"       = "#f68f44",
+  "1.5"     = "#fec029")
+
+p <- ggplot() +
+  # Points: colored by Dose
+  geom_hline(
+  data = pfoa_biodata,
+  aes(yintercept = Intake_mg_kg_day),
+  color = c("red", "blue"),
+  linetype = "dashed",
+  linewidth = 0.8
+)+
+  # Horizontal lines: colored by Source
+geom_rect(
+  data = pfoa_biodata,
+  aes(
+    ymin = Intake_low,
+    ymax = Intake_high
+  ),
+  xmin = -Inf,
+  xmax = Inf,
+  fill = c("red", "blue"),
+  alpha = 0.4
+) +
+  geom_jitter(
+    data = HED_pfoa_individual, 
+    aes(
+      x = factor(Dose_Time),
+      y = hed,
+      shape =Sex,
+      color = factor(Dose),
+      fill  = factor(Dose),
+    ), alpha = 0.6, size = 3, stroke = 1
+  ) +
+
+  # Log10 y-axis
+scale_y_log10(
+  limits = c(1e-8, 1e0),
+  breaks = 10^seq(-8, 0, by = 2)
+) +
+  # Point colors for Dose
+  scale_color_manual(
+    name   = "Dose (mg/kg/day)",
+    values = custom_colors_named
+  ) +
+  scale_fill_manual(
+  name = "Dose",
+  values = custom_colors_named
+  ) +
+    scale_shape_manual(
+    name = "Sex",
+    values = shape_map
+  ) +
+  labs(
+    title = "Predicted vs Observed PFOA",
+    x = "Dose (mg/kg/day)",
+    y = "mg/kg/day"
+  ) +
+
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Arial", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    panel.grid.major = element_line(linewidth = 0.4),
+    panel.grid.minor = element_blank()
+  )
+
+p
+
+ggsave(filename = "../plots/pfoa_hed.png", plot = p, width = 10, height = 4, dpi = 300,bg = "white")
+
+hed_summary_RD <- HED_pfoa_individual %>%
+  group_by(Dose, Time) %>%
+  summarise(
+    mean = mean(hed, na.rm = TRUE),
+    median = median(hed, na.rm = TRUE),
+    min = min(hed, na.rm = TRUE),
+    max = max(hed, na.rm = TRUE),
+    q25 = quantile(hed, 0.25, na.rm = TRUE),
+    q75 = quantile(hed, 0.75, na.rm = TRUE),
+    .groups = "drop"
   )
 ```
