@@ -133,7 +133,7 @@ pred_1comp_all <- map_df(dose_vec, function(dose) {
     Dose = dose,
     Time = pred_f$x,
     Predicted_Conc_uM = pred_f$y,
-    Model = "PFAS-1comp Female"
+    Sex = "Female"
   )
 
   # ---- Male model ----
@@ -166,84 +166,106 @@ write.csv(pars, "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modell
     Dose = dose,
     Time = pred_m$x,
     Predicted_Conc_uM = pred_m$y,
-    Model = "PFAS-1comp Male"
+     Sex = "Male"
   )
 
   bind_rows(df_f, df_m)
 })
 
-# ---- Combine Dose-Time ----
+
 plasma_obs$Dose_Time <- paste0(plasma_obs$Dose, " (", plasma_obs$Time, ")")
 pred_1comp_all$Dose_Time <- paste0(pred_1comp_all$Dose, " (", pred_1comp_all$Time, ")")
 pred_1comp_all <- subset(pred_1comp_all, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
-# ---- Plot ----
+
+
+#fold-change
+obs_summary <- plasma_obs %>%
+  group_by(Dose_Time) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- pred_1comp_all %>%
+  group_by(Dose_Time) %>%
+  summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE))
+agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
+
 p <- ggplot() +
+geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
   geom_jitter(
     data = plasma_obs,
-    aes(x = factor(Dose_Time), y = uM, color = factor(Dose), fill = factor(Dose), shape = Sex),
+    aes(
+      x = factor(Dose_Time),
+      y = uM,
+      color = factor(Dose),
+      fill = factor(Dose),
+      shape = Sex
+    ),
     size = 2, alpha = 0.5, width = 0.1, stroke = 1
   ) +
   geom_point(
-    data = pred_1comp_all,
-    aes(x = factor(Dose_Time), y = Predicted_Conc_uM, color = Model, shape = Model),
-    size = 2
-  ) +
+  data = pred_1comp_all,
+  aes(x = factor(Dose_Time), y = Predicted_Conc_uM, shape = Sex),
+  fill = "red",   # fills the shape
+  color = "red",  # outline
+  size = 2,
+  stroke = 0.5
+)+
+    
   labs(
-    title = "PFOS — Plasma: PFAS 1-comp vs Observed",
+    title =  NULL,
     x = "Dose (mg/kg/day)",
     y = "Plasma (µM)",
-    color = "Dose / Model"
   ) +
   scale_color_manual(
-    values = c(custom_colors_named, "PFAS-1comp Female" = "red", "PFAS-1comp Male" = "red")
+    values = c(custom_colors_named)
   ) +
   scale_fill_manual(values = custom_colors_named) +
-  scale_shape_manual(
-    values = c(shape_map, "PFAS-1comp Female" = 16, "PFAS-1comp Male" = 17)
-  ) +
+  scale_shape_manual(values = c("Female" = 21, "Male" = 24))+
   theme_minimal() +
   coord_cartesian(ylim = c(-10, 1500)) +
   theme(
     text = element_text(family = "Arial", size = 12),
     axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "b",
+    legend.position = "B",
     panel.grid.major = element_line(size = 0.5),
-    panel.grid.minor = element_blank()
-  )
-
-print(p)
+    panel.grid.minor = element_blank())
+p
 ggsave(filename = "../plots/pfos_1comp.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
 
 
-obs_vs_pred_table <- plasma_obs %>%
-  inner_join(pred_1comp_all, by = "Dose_Time", "Sex") %>%
-  mutate(
-    diff_uM   = Predicted_Conc_uM - uM,        # absolute difference
-    fold_diff = Predicted_Conc_uM / uM,        # fold-change
-    percent_diff = 100 * diff_uM / uM          # % difference
-  ) %>%
-  select(
-    Dose_Time,
-    Sex,
-    Observed_uM  = uM,
-    Predicted_uM = Predicted_Conc_uM,
-    diff_uM,
-    fold_diff,
-    percent_diff
-  ) %>%
-  arrange(desc(fold_diff))
-
-
-obs_vs_pred_table %>%
-summarise(
-    n = n(),
-    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
-    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
-    mean_fold  = mean(fold_diff, na.rm = TRUE),
-    times_lower = ifelse(mean_fold < 1, 1 / mean_fold, NA_real_),
-    times_higher = ifelse(mean_fold > 1, mean_fold, NA_real_),
+# Print summary
+sex_agreement <- agreement %>%
+  group_by(Dose_Time) %>%
+  summarise(
+    Mean_Fold = mean(Fold_Diff, na.rm = TRUE),
+    Mean_Obs = median(Mean_Obs, na.rm = TRUE),
     .groups = "drop"
   )
+
+
 pred_1comp_avg <- pred_1comp_all %>%
   group_by(Dose, Time) %>%
   summarise(
@@ -257,6 +279,7 @@ min_n <- min(replicate_summary$n)
 max_n <- max(replicate_summary$n)
 cat(sprintf("n = %d–%d mice/group\n", min_n, max_n))
 ```
+
 
 ##PFOA Plasma pfas1comp httk 2.7.2.
 ```{r}
@@ -312,7 +335,7 @@ pred_1comp_all <- map_df(dose_vec, function(dose) {
     Dose = dose,
     Time = pred_f$x,
     Predicted_Conc_uM = pred_f$y,
-    Model = "PFAS-1comp Female"
+    Sex = "Female"
   )
 
   # ---- Male model ----
@@ -344,7 +367,7 @@ write.csv(pars, "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modell
     Dose = dose,
     Time = pred_m$x,
     Predicted_Conc_uM = pred_m$y,
-    Model = "PFAS-1comp Male"
+    Sex = "Male"
   )
 
   bind_rows(df_f, df_m)
@@ -354,74 +377,96 @@ write.csv(pars, "C:/Users/aloan/OneDrive - HC-SC PHAC-ASPC/Documents/PBTK-Modell
 plasma_obs$Dose_Time <- paste0(plasma_obs$Dose, " (", plasma_obs$Time, ")")
 pred_1comp_all$Dose_Time <- paste0(pred_1comp_all$Dose, " (", pred_1comp_all$Time, ")")
 pred_1comp_all <- subset(pred_1comp_all, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
-# ---- Plot ----
+
+
+
+#fold-change
+obs_summary <- plasma_obs %>%
+  group_by(Dose_Time) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- pred_1comp_all %>%
+  group_by(Dose_Time) %>%
+  summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE))
+agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
+
 p <- ggplot() +
+geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) + 
   geom_jitter(
     data = plasma_obs,
-    aes(x = factor(Dose_Time), y = uM, color = factor(Dose), fill = factor(Dose), shape = Sex),
+    aes(
+      x = factor(Dose_Time),
+      y = uM,
+      color = factor(Dose),
+      fill = factor(Dose),
+      shape = Sex
+    ),
     size = 2, alpha = 0.5, width = 0.1, stroke = 1
   ) +
   geom_point(
-    data = pred_1comp_all,
-    aes(x = factor(Dose_Time), y = Predicted_Conc_uM, color = Model, shape = Model),
-    size = 2
-  ) +
+  data = pred_1comp_all,
+  aes(x = factor(Dose_Time), y = Predicted_Conc_uM, shape = Sex),
+  fill = "red",   # fills the shape
+  color = "red",  # outline
+  size = 2,
+  stroke = 0.5
+)+
   labs(
-    title = "PFOA — Plasma: PFAS 1-comp vs Observed",
+    title =  NULL,
     x = "Dose (mg/kg/day)",
     y = "Plasma (µM)",
-    color = "Dose / Model"
   ) +
   scale_color_manual(
-    values = c(custom_colors_named, "PFAS-1comp Female" = "red", "PFAS-1comp Male" = "red")
+    values = c(custom_colors_named)
   ) +
   scale_fill_manual(values = custom_colors_named) +
-  scale_shape_manual(
-    values = c(shape_map, "PFAS-1comp Female" = 16, "PFAS-1comp Male" = 17)
-  ) +
+  scale_shape_manual(values = c("Female" = 21, "Male" = 24))+
   theme_minimal() +
   coord_cartesian(ylim = c(-10, 600)) +
   theme(
     text = element_text(family = "Arial", size = 12),
     axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "b",
+    legend.position = "B",
     panel.grid.major = element_line(size = 0.5),
-    panel.grid.minor = element_blank()
-  )
-
+    panel.grid.minor = element_blank())
 p
 ggsave(filename = "../plots/pfoa_1comp.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
 
 
-obs_vs_pred_table <- plasma_obs %>%
-  inner_join(pred_1comp_all, by = "Dose_Time") %>%
-  mutate(
-    diff_uM   = Predicted_Conc_uM - uM,        # absolute difference
-    fold_diff = Predicted_Conc_uM / uM,        # fold-change
-    percent_diff = 100 * diff_uM / uM          # % difference
-  ) %>%
-  select(
-    Dose_Time,
-    Sex,
-    Observed_uM  = uM,
-    Predicted_uM = Predicted_Conc_uM,
-    diff_uM,
-    fold_diff,
-    percent_diff
-  ) %>%
-  arrange(desc(fold_diff))
-
-
-obs_vs_pred_table %>%
-summarise(
-    n = n(),
-    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
-    mean_diff_uM = mean(diff_uM, na.rm = TRUE),
-    mean_fold  = mean(fold_diff, na.rm = TRUE),
-    times_lower = ifelse(mean_fold < 1, 1 / mean_fold, NA_real_),
-    times_higher = ifelse(mean_fold > 1, mean_fold, NA_real_),
+# Print summary
+sex_agreement <- agreement %>%
+  group_by(Dose_Time) %>%
+  summarise(
+    Mean_Fold = mean(Fold_Diff, na.rm = TRUE),
+    Mean_Obs = median(Mean_Obs, na.rm = TRUE),
     .groups = "drop"
   )
+
+
 pred_1comp_avg <- pred_1comp_all %>%
   group_by(Dose, Time) %>%
   summarise(
@@ -566,17 +611,50 @@ pfos_obs$Dose_Time <- paste0(pfos_obs$Dose, " (", pfos_obs$Time, ")")
 predictions$Dose_Time <- paste0(predictions$Dose, " (", predictions$Time, ")")
 predictions <- subset(predictions, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+#fold-change
+obs_summary <- pfos_obs %>%
+  group_by(Dose_Time,Sex, Tissue) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- predictions %>%
+  group_by(Dose_Time, Sex, Tissue) %>%
+  summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE)) 
+agreement <- left_join(obs_summary, pred_summary, by = c("Sex","Dose_Time")) %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
 
 plot_pfos <- ggplot() +
-    # ---- Observed (dose-colored) ----
+     geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
   geom_jitter(
     data = pfos_obs %>% filter(Time %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = uM, shape = factor(Sex), color = factor(Dose), fill = factor(Dose)),
-    size = 2, alpha = 0.5, width = 0.1, stroke = 1,
+    size = 2, alpha = 0.5, width = 0.1, stroke = 1, 
   ) +
-  geom_point(
+      geom_point(
     data = predictions %>% filter(Time %in% c(28, 56)),
-    aes( x =factor(Dose_Time), y = Predicted_Conc_uM, shape = Sex),
+    aes(x = factor(Dose_Time), y = Predicted_Conc_uM, shape = Sex),
     fill = "red",color = "red", size = 2, 
   ) +
   facet_wrap(~ Tissue, scales = "free_y") +
@@ -784,14 +862,47 @@ pfoa_obs$Dose_Time <- paste0(pfoa_obs$Dose, " (", pfoa_obs$Time, ")")
 predictions$Dose_Time <- paste0(predictions$Dose, " (", predictions$Time, ")")
 predictions <- subset(predictions, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+#fold-change
+obs_summary <- pfoa_obs %>%
+  group_by(Dose_Time,Sex, Tissue) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- predictions %>%
+  group_by(Dose_Time, Sex, Tissue) %>%
+  summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE)) 
+agreement <- left_join(obs_summary, pred_summary, by = c("Sex","Dose_Time")) %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
 plot_pfoa <- ggplot() +
-    # ---- Observed (dose-colored) ----
+     geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
   geom_jitter(
     data = pfoa_obs %>% filter(Time %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = uM, shape = factor(Sex), color = factor(Dose), fill = factor(Dose)),
     size = 2, alpha = 0.5, width = 0.1, stroke = 1, 
   ) +
-  geom_point(
+        geom_point(
     data = predictions %>% filter(Time %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = Predicted_Conc_uM, shape = Sex),
     fill = "red",color = "red", size = 2, 
@@ -810,7 +921,7 @@ plot_pfoa <- ggplot() +
     values = shape_map
   ) +
   labs(
-    title = "Predicted vs Observed PFOS Concentrations (PBTK)",
+    title = "Predicted vs Observed PFOA Concentrations (PBTK)",
     x = "Dose (mg/kg)",
     y = "PFOA Concentration (µM)"
   ) +
@@ -887,31 +998,37 @@ chms <- data.frame(
 chms <- chms %>%
   mutate(
     # ng/mL → mg/L
-    C_plasma_mg_L = GeometricMean * 1e-3,
+    GeometricMean = GeometricMean * 1e-3,
     CI_Lower = CI_Lower * 1e-3,
     CI_Upper= CI_Upper * 1e-3)
 
 #https://pmc.ncbi.nlm.nih.gov/articles/PMC1964923/
-#imported as ng/ml  arithmetric mean 
-olsen <- data.frame(
-  Compound = c("PFOS", "PFOA"),
-  GeometricMean = c(799, 691),
-  CI_Lower = c(145, 72),
-  CI_Upper = c(3490, 5200)
-)
-
-olsen <- olsen %>%
+#imported as ng/ml  arithmetric mean change to geometric 
+ 
+olsen <- read.csv("../Input/Olsen et a., (2007) data.csv")
+olsen$PFOA <- as.numeric(gsub(",", "", olsen$PFOA))
+olsen$PFOS <- as.numeric(gsub(",", "", olsen$PFOS))
+olsen_summary <- olsen %>%
+  pivot_longer(cols = c(PFOA, PFOS), names_to = "Compound", values_to = "value") %>%
+  summarise(
+    GeometricMean = exp(mean(log(value), na.rm = TRUE)),
+    CI_Lower = exp(mean(log(value), na.rm = TRUE) - 1.96 * sd(log(value), na.rm = TRUE)/sqrt(n())),
+    CI_Upper = exp(mean(log(value), na.rm = TRUE) + 1.96 * sd(log(value), na.rm = TRUE)/sqrt(n())),
+    .by = Compound
+  )
+olsen_summary <- olsen_summary %>%
   mutate(
     # ng/mL → mg/L
-    C_plasma_mg_L = GeometricMean * 1e-3,
+    GeometricMean = GeometricMean * 1e-3,
     CI_Lower = CI_Lower * 1e-3,
-    CI_Upper= CI_Upper * 1e-3)
+    CI_Upper = CI_Upper * 1e-3
+  )
 ```
 
 ##PFOS Oral equiv
 ```{r}
 #Calculate human mg/kg/day
-combined_pfos <- rbind(olsen, chms) %>%
+combined_pfos <- rbind(olsen_summary, chms) %>%
   filter(Compound == "PFOS")
 
 pars <- parameterize_sumclearancespfas(
@@ -927,7 +1044,7 @@ oral_equiv_humans <- combined_pfos %>%
     oral_equiv_mgkgd = calc_mc_oral_equiv(
       species = "Human",
       chem.cas = "1763-23-1",
-      conc = C_plasma_mg_L,
+      conc = GeometricMean,
       model = "sumclearancespfas",
       input.units = "mg/L",
       output.units = "mgpkgpday",
@@ -1089,7 +1206,7 @@ ggsave(filename = "../plots/pfos_hed_httk.png", plot = p, width = 10, height = 4
 ##PFOA Oral equiv
 ```{r}
 #Calculate human mg/kg/day
-combined_pfoa <- rbind(olsen, chms) %>%
+combined_pfoa <- rbind(olsen_summary, chms) %>%
   filter(Compound == "PFOA")
 
 pars <- parameterize_sumclearancespfas(
@@ -1106,7 +1223,7 @@ oral_equiv_humans <- combined_pfoa %>%
     oral_equiv_mgkgd = calc_mc_oral_equiv(
       species = "Human",
       chem.cas = "335-67-1",
-      conc = C_plasma_mg_L,
+      conc = GeometricMean,
       model = "sumclearancespfas",
       input.units = "mg/L",
       output.units = "mgpkgpday",

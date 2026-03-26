@@ -582,8 +582,42 @@ pfoa_obs$Dose_Time <- paste0(pfoa_obs$Dose, " (", pfoa_obs$Time, ")")
 pbtk$Dose_Time <- paste0(pbtk$dose, " (", pbtk$day, ")")
 pbtk <- subset(pbtk, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+#fold-change
+obs_summary <- pfoa_obs %>%
+  group_by(Dose_Time, Sex, Tissue) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- pbtk %>%
+  group_by(Dose_Time, Tissue) %>%
+  summarise(Mean_Pred = mean(Concentration_uM, na.rm = TRUE)) 
+agreement <- left_join(obs_summary, pred_summary, by = c("Dose_Time")) %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
+
 plot_pfoa <- ggplot() +
-    # ---- Observed (dose-colored) ----
+ geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
   geom_jitter(
     data = pfoa_obs %>% filter(Time %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = uM, shape = factor(Sex), color = factor(Dose), fill = factor(Dose)),
@@ -1233,8 +1267,42 @@ pfos_obs$Dose_Time <- paste0(pfos_obs$Dose, " (", pfos_obs$Time, ")")
 pbtk$Dose_Time <- paste0(pbtk$dose, " (", pbtk$day, ")")
 pbtk <- subset(pbtk, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+#fold-change
+obs_summary <- pfos_obs %>%
+  group_by(Dose_Time, Sex, Tissue) %>%
+  summarise(Mean_Obs = mean(uM, na.rm = TRUE))
+
+pred_summary <- pbtk %>%
+  group_by(Dose_Time, Tissue) %>%
+  summarise(Mean_Pred = mean(Concentration_uM, na.rm = TRUE)) 
+agreement <- left_join(obs_summary, pred_summary, by = c("Dose_Time")) %>%
+  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
+
 plot_pfos <- ggplot() +
-    # ---- Observed (dose-colored) ----
+ geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 5,
+    ymax = Mean_Pred * 5,
+    group = 1      # important for factors
+  ),
+  fill = "lightgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
+   geom_ribbon(
+  data = pred_summary ,
+  aes(
+    x = factor(Dose_Time),
+    ymin = Mean_Pred / 2,
+    ymax = Mean_Pred * 2,
+    group = 1      # important for factors
+  ),
+  fill = "darkgrey",
+  alpha = 0.2,
+  inherit.aes = FALSE
+) +
   geom_jitter(
     data = pfos_obs %>% filter(Time %in% c(28, 56)),
     aes(x = factor(Dose_Time), y = uM, shape = factor(Sex), color = factor(Dose), fill = factor(Dose)),
@@ -1273,6 +1341,7 @@ plot_pfos <- ggplot() +
     panel.grid.minor = element_blank())
 
 plot_pfos
+
 ggsave(filename = "../plots/pfos_fischer.png", plot = plot_pfos, width = 12.5, height = 7.5, dpi = 300,bg = "white")
 
 obs_vs_pred_table <- pfos_obs %>%

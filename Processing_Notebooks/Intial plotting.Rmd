@@ -1162,7 +1162,7 @@ write.csv(pfas_obs_all,"../Output/observed_data.csv")
 
 #HED simple EPA calc
 ```{r}
-#HED = average serum concentration (mg/L) × CL, where CL 81 (L/kg bw/day)
+#HED=average serum concentration (mg/L)×CL(L/kg bw/day)
 
 pfas_obs_all <- read.csv("../Output/observed_data.csv")
 pfos_obs <- pfas_obs_all %>%
@@ -1225,7 +1225,7 @@ chms <- data.frame(
 chms <- chms %>%
   mutate(
     # ng/mL → mg/L
-    C_plasma_mg_L = GeometricMean * 1e-3,
+    GeometricMean = GeometricMean * 1e-3,
 
     CL_L_kg_day = case_when(
       # imported as L/h/KG 
@@ -1233,24 +1233,30 @@ chms <- chms %>%
       Compound == "PFOA" ~ 5.5615e-06	*24
     ),
 
-    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
+    Intake_mg_kg_day = GeometricMean * CL_L_kg_day,
 
     Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
     Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
   )
 
 #https://pmc.ncbi.nlm.nih.gov/articles/PMC1964923/
-#imported as ng/ml  arithmetric mean 
-olsen <- data.frame(
-  Compound = c("PFOS", "PFOA"),
-  GeometricMean = c(799, 691),
-  CI_Lower = c(145, 72),
-  CI_Upper = c(3490, 5200)
-)
-olsen <- olsen %>%
+#imported as ng/ml  
+olsen <- read.csv("../Input/Olsen et a., (2007) data.csv")
+olsen$PFOA <- as.numeric(gsub(",", "", olsen$PFOA))
+olsen$PFOS <- as.numeric(gsub(",", "", olsen$PFOS))
+olsen_summary <- olsen %>%
+  pivot_longer(cols = c(PFOA, PFOS), names_to = "Compound", values_to = "value") %>%
+  summarise(
+    GeometricMean = exp(mean(log(value), na.rm = TRUE)),
+    CI_Lower = exp(mean(log(value), na.rm = TRUE) - 1.96 * sd(log(value), na.rm = TRUE)/sqrt(n())),
+    CI_Upper = exp(mean(log(value), na.rm = TRUE) + 1.96 * sd(log(value), na.rm = TRUE)/sqrt(n())),
+    .by = Compound
+  )
+
+olsen_summary <- olsen_summary %>%
   mutate(
     # ng/mL → mg/L
-    C_plasma_mg_L = GeometricMean * 1e-3,
+    GeometricMean = GeometricMean * 1e-3,
 
     CL_L_kg_day = case_when(
       # imported as L/h/KG 
@@ -1258,12 +1264,12 @@ olsen <- olsen %>%
       Compound == "PFOA" ~ 5.5615e-06	*24
     ),
 
-    Intake_mg_kg_day = C_plasma_mg_L * CL_L_kg_day,
+    Intake_mg_kg_day = GeometricMean * CL_L_kg_day,
 
     Intake_low = CI_Lower * 1e-3 * CL_L_kg_day,
     Intake_high = CI_Upper * 1e-3 * CL_L_kg_day
   )
-combined <- rbind(olsen, chms)
+combined <- rbind(olsen_summary, chms)
 
 ```
 
