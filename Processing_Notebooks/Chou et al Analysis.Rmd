@@ -301,6 +301,7 @@ obs_vs_pred_table <- pfos_obs %>%
 
 
 tissue_summary <- obs_vs_pred_table %>%
+    filter(!Dose_Time %in% c("0 (28)", "0 (56)")) %>%
   group_by(Tissue) %>%
   summarise(
     n = n(),

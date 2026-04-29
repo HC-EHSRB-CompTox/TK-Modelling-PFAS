@@ -70,10 +70,8 @@ info_pfoa_mouse <- subset(
 )
 info_pfoa_mouse
 
-#account for cd1 to c57 conversion
-pfoa_clearance_m <- 0.001331 *1.5 * 0.1805
-pfoa_clearance_f <- 0.001851 *1.5 * 0.1805
 ```
+
 ##PFOS Plasma pfas1comp httk 2.7.2.
 ```{r}
 mw_pfos <- 500.13  # g/mol for PFOS
@@ -89,7 +87,7 @@ custom_colors_named <- c(
   "1.5"   = "#fec029"
 )
 
-# ---- Data Prep ----
+
 pfos_obs <- pfas_obs_all %>%
   filter(PFAS_type == "PFOS") %>%
   mutate(uM = as.numeric(trimws(uM)))
@@ -177,8 +175,8 @@ plasma_obs$Dose_Time <- paste0(plasma_obs$Dose, " (", plasma_obs$Time, ")")
 pred_1comp_all$Dose_Time <- paste0(pred_1comp_all$Dose, " (", pred_1comp_all$Time, ")")
 pred_1comp_all <- subset(pred_1comp_all, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+# Plotting
 
-#fold-change
 obs_summary <- plasma_obs %>%
   group_by(Dose_Time) %>%
   summarise(Mean_Obs = mean(uM, na.rm = TRUE))
@@ -186,8 +184,6 @@ obs_summary <- plasma_obs %>%
 pred_summary <- pred_1comp_all %>%
   group_by(Dose_Time) %>%
   summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE))
-agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
-  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
 
 p <- ggplot() +
 geom_ribbon(
@@ -253,25 +249,21 @@ geom_ribbon(
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 p
-ggsave(filename = "../plots/pfos_1comp.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
+ggsave(filename = "../plots/pfos_1comp.png", plot = p, width = 5, height = 3, dpi = 300,bg = "white")
+
 
 
 # Print summary
-sex_agreement <- agreement %>%
-  group_by(Dose_Time) %>%
-  summarise(
-    Mean_Fold = mean(Fold_Diff, na.rm = TRUE),
-    Mean_Obs = median(Mean_Obs, na.rm = TRUE),
-    .groups = "drop"
-  )
+agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
+  mutate(Fold_Diff = Mean_Pred / Mean_Obs)
+print(agreement, digits = 4)
+
+mean_fold <- agreement %>%
+  filter(!Dose_Time %in% c("0 (28)", "0 (56)")) %>%
+  summarise(Mean_Fold_Diff = mean(Fold_Diff))
+mean_fold
 
 
-pred_1comp_avg <- pred_1comp_all %>%
-  group_by(Dose, Time) %>%
-  summarise(
-    Predicted_Conc_uM = mean(Predicted_Conc_uM, na.rm = TRUE),
-    .groups = "drop"
-  )
 replicate_summary <- plasma_obs%>%
   group_by(Dose, Time) %>%  
   summarise(n = n(), .groups = "drop")
@@ -291,7 +283,6 @@ available_rblood2plasma(
   class.exclude = TRUE,
 )
 
-# ---- Data Prep ----
 pfoa_obs <- pfas_obs_all %>%
   filter(PFAS_type == "PFOA") %>%
   mutate(uM = as.numeric(trimws(uM)))
@@ -316,7 +307,7 @@ pred_1comp_all <- map_df(dose_vec, function(dose) {
   )
   pars_f$Funbound.plasma <-  0.0142 #mouse c57 file:///C:/Users/aloan/Downloads/toxics-12-00253.pdf
   pars_f$Vdist <- 0.1805
-  pars_f$kelim <- 0.001851 * 1.5 #https://pmc.ncbi.nlm.nih.gov/articles/PMC4464984/
+  pars_f$kelim <- 0.001851 
   pars_f$Rblood2plasma <- 0.9047 # from r2bp function
   pars_f$Caco2.Pab <- 1.6
 
@@ -347,7 +338,7 @@ pred_1comp_all <- map_df(dose_vec, function(dose) {
   )
   pars_m$Funbound.plasma <- 0.0142 #mouse c57 file:///C:/Users/aloan/Downloads/toxics-12-00253.pdf
   pars_m$Vdist <- 0.1805
-  pars_m$kelim <- 0.001331* 1.5 #https://pmc.ncbi.nlm.nih.gov/articles/PMC4464984/
+  pars_m$kelim <- 0.001331
   pars_m$Rblood2plasma <- 0.9047 # from r2bp function
   pars_m$Caco2.Pab <- 1.6
   pars <- rbind(pars_f, pars_m)
@@ -378,9 +369,8 @@ plasma_obs$Dose_Time <- paste0(plasma_obs$Dose, " (", plasma_obs$Time, ")")
 pred_1comp_all$Dose_Time <- paste0(pred_1comp_all$Dose, " (", pred_1comp_all$Time, ")")
 pred_1comp_all <- subset(pred_1comp_all, !(Dose_Time %in% c("0.166 (28)", "0.5 (28)", "1 (28)")))
 
+#Plotting
 
-
-#fold-change
 obs_summary <- plasma_obs %>%
   group_by(Dose_Time) %>%
   summarise(Mean_Obs = mean(uM, na.rm = TRUE))
@@ -388,8 +378,6 @@ obs_summary <- plasma_obs %>%
 pred_summary <- pred_1comp_all %>%
   group_by(Dose_Time) %>%
   summarise(Mean_Pred = mean(Predicted_Conc_uM, na.rm = TRUE))
-agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
-  mutate(Fold_Diff = Mean_Obs / Mean_Pred)
 
 p <- ggplot() +
 geom_ribbon(
@@ -454,25 +442,20 @@ geom_ribbon(
     panel.grid.major = element_line(size = 0.5),
     panel.grid.minor = element_blank())
 p
-ggsave(filename = "../plots/pfoa_1comp.png", plot = p, width = 6, height = 3, dpi = 300,bg = "white")
+ggsave(filename = "../plots/pfoa_1comp.png", plot = p, width = 5, height = 3, dpi = 300,bg = "white")
 
 
 # Print summary
-sex_agreement <- agreement %>%
-  group_by(Dose_Time) %>%
-  summarise(
-    Mean_Fold = mean(Fold_Diff, na.rm = TRUE),
-    Mean_Obs = median(Mean_Obs, na.rm = TRUE),
-    .groups = "drop"
-  )
+agreement <- left_join(obs_summary, pred_summary, by = "Dose_Time") %>%
+  mutate(Fold_Diff = Mean_Pred / Mean_Obs)
+print(agreement, digits = 4)
+
+mean_fold <- agreement %>%
+    filter(!Dose_Time %in% c("0 (28)", "0 (56)")) %>%
+  summarise(Mean_Fold_Diff = mean(Fold_Diff))
+mean_fold
 
 
-pred_1comp_avg <- pred_1comp_all %>%
-  group_by(Dose, Time) %>%
-  summarise(
-    Predicted_Conc_uM = mean(Predicted_Conc_uM, na.rm = TRUE),
-    .groups = "drop"
-  )
 replicate_summary <- plasma_obs%>%
   group_by(Dose, Time) %>%  
   summarise(n = n(), .groups = "drop")
@@ -716,6 +699,7 @@ obs_vs_pred_table <- pfos_obs %>%
 
 tissue_summary <- obs_vs_pred_table %>%
   group_by(Tissue) %>%
+    filter(!Dose_Time %in% c("0 (28)", "0 (56)")) %>%
   summarise(
     n = n(),
     mean_diff_uM = mean(diff_uM, na.rm = TRUE),
@@ -772,20 +756,20 @@ pars_base <- parameterize_pbtk(
 # ---- Male parameters ----
 pars_m <- pars_base
 pars_m$Vdist <- 0.1805
-pars_m$kelim <- 0.001331 * 1.5 #https://pmc.ncbi.nlm.nih.gov/articles/PMC4464984/
+pars_m$kelim <- 0.001331 
 pars_m$Funbound.plasma <- 0.0142
 pars_m$Rblood2plasma <- 0.9047
 pars_m$Caco2.Pab <- 1.6
-pars_m$Clmetabolismc <- pfoa_clearance_m
+pars_m$Clmetabolismc <- 0.0002402
   
 # ---- Female parameters ----
 pars_f <- pars_base
 pars_f$Vdist <- 0.1805
-pars_f$kelim <- 0.001851 * 1.5 #https://pmc.ncbi.nlm.nih.gov/articles/PMC4464984/
+pars_f$kelim <- 0.001851 
 pars_f$Funbound.plasma <- 0.0142
 pars_f$Rblood2plasma <- 0.9047
 pars_f$Caco2.Pab <- 1.6
-pars_f$Clmetabolismc <- pfoa_clearance_f
+pars_f$Clmetabolismc <- 0.0003341
 
 pars_f_df <- data.frame(
   Parameter = names(pars_f),
@@ -964,6 +948,7 @@ obs_vs_pred_table <- pfoa_obs %>%
 
 tissue_summary <- obs_vs_pred_table %>%
   group_by(Tissue) %>%
+    filter(!Dose_Time %in% c("0 (28)", "0 (56)")) %>%
   summarise(
     n = n(),
     mean_diff_uM = mean(diff_uM, na.rm = TRUE),
@@ -1003,7 +988,7 @@ chms <- chms %>%
     CI_Upper= CI_Upper * 1e-3)
 
 #https://pmc.ncbi.nlm.nih.gov/articles/PMC1964923/
-#imported as ng/ml  arithmetric mean change to geometric 
+#imported as ng/ml  arithmetric mean changed to geometric 
  
 olsen <- read.csv("../Input/Olsen et a., (2007) data.csv")
 olsen$PFOA <- as.numeric(gsub(",", "", olsen$PFOA))
@@ -1141,7 +1126,6 @@ p <- ggplot() +
   linetype = "dashed",
   linewidth = 0.8
 )+
-  # Horizontal lines: colored by Source
 geom_rect(
   data = oral_equiv_humans,
   aes(
@@ -1153,7 +1137,6 @@ geom_rect(
   fill = c("red", "blue"),
   alpha = 0.4
 ) +
-  # Points: colored by Dose
   geom_jitter(
     data = oral_equiv_individual, 
     aes(
@@ -1168,12 +1151,10 @@ geom_rect(
     name = "Sex",
     values = shape_map
   ) +
-  # Log10 y-axis
 scale_y_log10(
   limits = c(1e-8, 1e0),
   breaks = 10^seq(-8, 0, by = 2)
 ) +
-  # Point colors for Dose
   scale_color_manual(
     name   = "Dose (mg/kg/day)",
     values = custom_colors_named
@@ -1308,7 +1289,6 @@ p <- ggplot() +
   linetype = "dashed",
   linewidth = 0.8
 )+
-  # Horizontal lines: colored by Source
  geom_rect(
   data = oral_equiv_humans,
   aes(
@@ -1333,13 +1313,10 @@ p <- ggplot() +
     name = "Sex",
     values = shape_map
   ) +
-  # Log10 y-axis
 scale_y_log10(
   limits = c(1e-8, 1e0),
   breaks = 10^seq(-8, 0, by = 2)
 ) +
-
-  # Point colors for Dose
   scale_color_manual(
     name   = "Dose (mg/kg/day)",
     values = custom_colors_named
